@@ -1097,7 +1097,7 @@ const previewBtnGoogleReadOnly=document.getElementById('previewBtn');
 if(previewBtnGoogleReadOnly)previewBtnGoogleReadOnly.onclick=openOutputPreview;
 
 
-// BƯỚC 5.1.3K - Tuần 4: ghi từ TKB nguồn thật, không dùng điều chỉnh xuất tạm; kiểm tra trùng tiết, cơ cấu môn và tên bài.
+// BƯỚC 5.1.3M - Tuần 4: ghi từ TKB nguồn thật, không dùng điều chỉnh xuất tạm; kiểm tra trùng tiết, cơ cấu môn và tên bài.
 // Chỉ ghi khi: đúng Spreadsheet, đúng tab/GID, đang chọn Tuần 4, Google Sheet chưa có Tuần 4.
 const GOOGLE_SHEETS_TEACHER_GID=1908030276;
 function gsA1Title(title){return `'${String(title).replace(/'/g,"''")}'`;}
@@ -1174,12 +1174,25 @@ function gsWeek4Rows(data){
 async function exportWeek4ToGoogleSheet(){
   const btn=document.querySelector('#outputPreviewModal .preview-google-write-week4'), old=btn?.textContent;
   try{
-    if(Number($('weekSelect')?.value)!==4)throw new Error('BƯỚC 5.1.3K chỉ cho phép ghi Tuần 4. Hãy chọn Tuần 4 trước.');
+    if(Number($('weekSelect')?.value)!==4)throw new Error('BƯỚC 5.1.3N chỉ cho phép ghi Tuần 4. Hãy chọn Tuần 4 trước.');
     // 5.1.3K: Google Sheet là bản ghi thật nên lấy trực tiếp TKB nguồn + Phụ lục 2,
     // KHÔNG dùng lớp điều chỉnh tạm của Xem trước (localStorage), tránh một chỉnh sửa cũ làm
     // đổi môn/lớp hoặc tạo trùng tiết khi ghi sang Google Sheet.
     applyLessonPlan();
     const data=filterSchedule().map(x=>({...x}));
+
+    // BƯỚC 5.1.3N: tuyệt đối dùng môn đã đọc từ TKB nguồn, không hard-code đổi môn.
+    // File TKB chuẩn mới phải cho: Thứ Tư - Chiều - Tiết 2 - lớp 3B2 = Tin học.
+    // Nếu app vẫn đang giữ TKB cũ (3B2 = Công nghệ), dừng và yêu cầu nhập lại TKB đã sửa.
+    const lesson3B2=data.find(x=>
+      normKey(x?.thu)==='tu' && normKey(x?.buoi)==='chieu' &&
+      Number(x?.tiet)===2 && normKey(x?.lop)==='3b2'
+    );
+    if(!lesson3B2)throw new Error('DỪNG GHI: TKB nguồn không có lớp 3B2 tại Thứ Tư - Chiều - Tiết 2.');
+    const source3B2=normKey(normalizeSubjectForPlan(lesson3B2.monHoc)).replace(/[^a-z0-9]+/g,'');
+    if(!(source3B2.includes('tinhoc')||source3B2==='th'))
+      throw new Error(`DỪNG GHI: TKB đang nạp vẫn ghi 3B2 Thứ Tư - Chiều - Tiết 2 = ${normalizeSubjectForPlan(lesson3B2.monHoc)||lesson3B2.monHoc}. Hãy nhập lại file TKB đã sửa, trong đó ô này là Tin học.`);
+
     if(!data.length)throw new Error('Tuần 4 hiện không có dữ liệu TKB nguồn để ghi.');
     if(data.length!==20)throw new Error(`DỪNG GHI: TKB nguồn Tuần 4 phải có đúng 20 tiết, hiện đọc được ${data.length} tiết.`);
 
@@ -1255,7 +1268,7 @@ async function exportWeek4ToGoogleSheet(){
 }
 function ensureGoogleSheetsWeek4WriteButton(){
   const bar=document.querySelector('#outputPreviewModal .output-preview-bar>div'); if(!bar||bar.querySelector('.preview-google-write-week4'))return;
-  const close=bar.querySelector('.preview-close'); const b=document.createElement('button'); b.type='button';b.className='preview-google-write-week4';b.textContent='Ghi Tuần 4 vào Google Sheet';b.title='BƯỚC 5.1.3K – ghi từ TKB nguồn thật, kiểm tra 20 tiết / Tin 7 / Công nghệ 12 / Đạo đức 1 / tên bài';b.onclick=exportWeek4ToGoogleSheet;bar.insertBefore(b,close||null);
+  const close=bar.querySelector('.preview-close'); const b=document.createElement('button'); b.type='button';b.className='preview-google-write-week4';b.textContent='Ghi Tuần 4 vào Google Sheet';b.title='BƯỚC 5.1.3N – đọc đúng môn 3B2 trực tiếp từ TKB nguồn đã sửa; không hard-code';b.onclick=exportWeek4ToGoogleSheet;bar.insertBefore(b,close||null);
 }
 const openOutputPreviewBeforeWeek4Write=openOutputPreview;
 openOutputPreview=function(){openOutputPreviewBeforeWeek4Write();ensureGoogleSheetsWeek4WriteButton();};
