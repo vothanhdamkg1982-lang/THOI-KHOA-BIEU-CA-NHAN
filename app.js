@@ -1515,7 +1515,8 @@ async function exportSelectedWeek1To35ToGoogleSheet(){
     if(!confirm(`${action} TUẦN ${week} vào tab Võ Thanh Đậm?\n\nVùng dòng ${startRow}–${endRow}. Mẫu định dạng lấy từ tab mẫu ẩn, không phụ thuộc các tuần đang tồn tại.\nTKB tuần này hiện có ${data.length} tiết; tổng kể cả kiêm nhiệm: ${data.length+getConcurrentPeriods()}.`))return;
     if(btn)btn.textContent=`Đang ${action.toLowerCase()} Tuần ${week}...`;
     const requests=[{unmergeCells:{range:{sheetId:GOOGLE_SHEETS_TEACHER_GID,startRowIndex:d0,endRowIndex:d1,startColumnIndex:0,endColumnIndex:8}}},{copyPaste:{source:{sheetId:templateSheetId,startRowIndex:s0,endRowIndex:s1,startColumnIndex:0,endColumnIndex:8},destination:{sheetId:GOOGLE_SHEETS_TEACHER_GID,startRowIndex:d0,endRowIndex:d1,startColumnIndex:0,endColumnIndex:8},pasteType:'PASTE_NORMAL',pasteOrientation:'NORMAL'}}];
-    srcMerges.forEach(m=>requests.push({mergeCells:{range:{sheetId:GOOGLE_SHEETS_TEACHER_GID,startRowIndex:m.startRowIndex+offset,endRowIndex:m.endRowIndex+offset,startColumnIndex:m.startColumnIndex,endColumnIndex:m.endColumnIndex},mergeType:'MERGE_ALL'}}));
+    // BƯỚC 5.2.14C: PASTE_NORMAL đã sao chép cấu trúc merge từ tab mẫu.
+    // Không merge lại srcMerges lần hai vì sẽ chồng lên merge vừa được copy và Google Sheets từ chối.
     srcRowMeta.forEach((rm,i)=>{if(rm?.pixelSize)requests.push({updateDimensionProperties:{range:{sheetId:GOOGLE_SHEETS_TEACHER_GID,dimension:'ROWS',startIndex:d0+i,endIndex:d0+i+1},properties:{pixelSize:rm.pixelSize},fields:'pixelSize'}});});
     const scheduleStartIndex=specialWeek1?9:d0+5;
     const scheduleEndIndex=scheduleStartIndex+7;
@@ -1529,11 +1530,8 @@ async function exportSelectedWeek1To35ToGoogleSheet(){
     const leftSubHeaderRow=leftHeaderRow+1;
     const leftScheduleStart=leftHeaderRow+2;
     const leftScheduleEnd=leftScheduleStart+7;
+    // BƯỚC 5.2.14C: giữ nguyên merge A:B đã được copy từ tab mẫu; chỉ áp lại định dạng và ghi nhãn bên dưới.
     const leftReq=[
-      {unmergeCells:{range:{sheetId:GOOGLE_SHEETS_TEACHER_GID,startRowIndex:leftHeaderRow-1,endRowIndex:leftScheduleEnd-1,startColumnIndex:0,endColumnIndex:2}}},
-      {mergeCells:{range:{sheetId:GOOGLE_SHEETS_TEACHER_GID,startRowIndex:leftHeaderRow-1,endRowIndex:leftHeaderRow,startColumnIndex:0,endColumnIndex:2},mergeType:'MERGE_ALL'}},
-      {mergeCells:{range:{sheetId:GOOGLE_SHEETS_TEACHER_GID,startRowIndex:leftScheduleStart-1,endRowIndex:leftScheduleStart+3,startColumnIndex:0,endColumnIndex:1},mergeType:'MERGE_ALL'}},
-      {mergeCells:{range:{sheetId:GOOGLE_SHEETS_TEACHER_GID,startRowIndex:leftScheduleStart+3,endRowIndex:leftScheduleEnd-1,startColumnIndex:0,endColumnIndex:1},mergeType:'MERGE_ALL'}},
       {repeatCell:{range:{sheetId:GOOGLE_SHEETS_TEACHER_GID,startRowIndex:leftHeaderRow-1,endRowIndex:leftScheduleEnd-1,startColumnIndex:0,endColumnIndex:2},cell:{userEnteredFormat:{horizontalAlignment:'CENTER',verticalAlignment:'MIDDLE',wrapStrategy:'WRAP',textFormat:{fontFamily:'Times New Roman',fontSize:12}}},fields:'userEnteredFormat(horizontalAlignment,verticalAlignment,wrapStrategy,textFormat)'}},
       {repeatCell:{range:{sheetId:GOOGLE_SHEETS_TEACHER_GID,startRowIndex:leftHeaderRow-1,endRowIndex:leftSubHeaderRow,startColumnIndex:0,endColumnIndex:2},cell:{userEnteredFormat:{textFormat:{bold:true,fontFamily:'Times New Roman',fontSize:12}}},fields:'userEnteredFormat.textFormat'}},
       {repeatCell:{range:{sheetId:GOOGLE_SHEETS_TEACHER_GID,startRowIndex:leftScheduleStart-1,endRowIndex:leftScheduleEnd-1,startColumnIndex:0,endColumnIndex:2},cell:{userEnteredFormat:{borders:{top:{style:'SOLID'},bottom:{style:'SOLID'},left:{style:'SOLID'},right:{style:'SOLID'}}}},fields:'userEnteredFormat.borders'}}
