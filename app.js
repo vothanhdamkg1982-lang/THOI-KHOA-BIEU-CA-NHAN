@@ -1527,3 +1527,39 @@ function ensureGoogleSheetsWeek1To35WriteButton(){
 const openOutputPreviewBeforeWeek1To35Write=openOutputPreview;
 openOutputPreview=function(){openOutputPreviewBeforeWeek1To35Write();ensureGoogleSheetsWeek1To35WriteButton();};
 const previewBtnWeek1To35Write=document.getElementById('previewBtn');if(previewBtnWeek1To35Write)previewBtnWeek1To35Write.onclick=openOutputPreview;
+
+// BƯỚC 5.2.4 - Làm mới dữ liệu Tuần 1–35 trên Google Sheet an toàn.
+// Chỉ xóa GIÁ TRỊ trong vùng A8:H777 của đúng tab giáo viên đã xác minh.
+// Không xóa/đổi định dạng, không đụng tab khác; bảo đảm tab mẫu ẩn tồn tại trước khi làm sạch.
+async function resetGoogleSheetWeeks1To35(){
+  const btn=document.querySelector('#outputPreviewModal .preview-google-reset-weeks'),old=btn?.textContent;
+  try{
+    if(btn){btn.disabled=true;btn.textContent='Đang kiểm tra...';}
+    const token=await getGoogleSheetsReadOnlyToken(),headers={Authorization:`Bearer ${token}`,'Content-Type':'application/json'},base=`https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(GOOGLE_SHEETS_SPREADSHEET_ID)}`;
+    let meta=await gsJson(`${base}?fields=properties.title,sheets.properties(sheetId,title,hidden,gridProperties)`,{headers});
+    const teacher=(meta.sheets||[]).find(s=>Number(s?.properties?.sheetId)===GOOGLE_SHEETS_TEACHER_GID);
+    if(!teacher||googleSheetNameKey(teacher.properties.title)!==googleSheetNameKey(GOOGLE_SHEETS_TEACHER_NAME))throw new Error(`DỪNG LÀM MỚI: không khớp tab ${GOOGLE_SHEETS_TEACHER_NAME} / GID ${GOOGLE_SHEETS_TEACHER_GID}.`);
+    const title=teacher.properties.title,q=gsA1Title(title),maxRows=Number(teacher.properties?.gridProperties?.rowCount)||0;
+    if(maxRows<777)throw new Error(`Google Sheet hiện chỉ có ${maxRows} dòng. Cần ít nhất 777 dòng để quản lý đủ Tuần 1–35.`);
+    const tpl=await ensureIndependentGoogleSheetTemplate(base,headers,meta);
+    if(!tpl?.sheetId)throw new Error('Chưa bảo đảm được tab mẫu ẩn. App dừng trước khi xóa dữ liệu.');
+    const ok1=confirm(`LÀM MỚI TUẦN 1–35 trên tab ${title}?\n\nApp sẽ xóa dữ liệu trong vùng A8:H777 của CHÍNH tab này.\nĐịnh dạng và tab mẫu ẩn vẫn được giữ nguyên.\nCác tab giáo viên khác không bị tác động.`);
+    if(!ok1)return;
+    const ok2=confirm(`XÁC NHẬN LẦN CUỐI\n\nToàn bộ dữ liệu Tuần 1–35 hiện có trên tab ${title} sẽ bị xóa để ghi lại từ Tuần 1.\n\nChọn OK để thực hiện.`);
+    if(!ok2)return;
+    if(btn)btn.textContent='Đang làm mới Tuần 1–35...';
+    await gsJson(`${base}/values/${encodeURIComponent(q+'!A8:H777')}:clear`,{method:'POST',headers,body:'{}'});
+    const verify=await gsJson(`${base}/values/${encodeURIComponent(q+'!A8:H777')}?majorDimension=ROWS`,{headers});
+    const remain=[];(verify.values||[]).forEach((r,i)=>{const w=googleSheetWeekFromLine((r||[]).join(' '));if(w!==null)remain.push({week:w,row:8+i});});
+    if(remain.length)throw new Error(`Đã gửi lệnh làm mới nhưng vẫn còn nhận diện tuần tại dòng ${remain.slice(0,3).map(x=>x.row).join(', ')}.`);
+    alert(`LÀM MỚI TUẦN 1–35 THÀNH CÔNG\n\nTab: ${title}\nVùng đã làm sạch: A8:H777\nTab mẫu ẩn: vẫn được giữ nguyên.\n\nBây giờ hãy chọn Tuần 1 → Xem trước → Ghi/Cập nhật Tuần 1 vào Google Sheet.`);
+  }catch(err){console.error('[TKB] 5.2.4 Làm mới Tuần 1–35:',err);alert(`CHƯA LÀM MỚI GOOGLE SHEET\n\n${err?.message||err}\n\nKhông có lệnh ghi tuần nào được thực hiện.`);}finally{if(btn){btn.disabled=false;btn.textContent=old||'Làm mới Tuần 1–35';}}
+}
+function ensureGoogleSheetsResetWeeksButton(){
+  const bar=document.querySelector('#outputPreviewModal .output-preview-bar>div');if(!bar)return;
+  let b=bar.querySelector('.preview-google-reset-weeks');
+  if(!b){const write=bar.querySelector('.preview-google-write-week1-35'),close=bar.querySelector('.preview-close');b=document.createElement('button');b.type='button';b.className='preview-google-reset-weeks';b.textContent='Làm mới Tuần 1–35';b.title='BƯỚC 5.2.4 – xóa dữ liệu Tuần 1–35 của đúng tab giáo viên hiện tại, giữ nguyên mẫu ẩn';b.onclick=resetGoogleSheetWeeks1To35;bar.insertBefore(b,write||close||null);}
+}
+const openOutputPreviewBeforeResetWeeks=openOutputPreview;
+openOutputPreview=function(){openOutputPreviewBeforeResetWeeks();ensureGoogleSheetsResetWeeksButton();};
+const previewBtnResetWeeks=document.getElementById('previewBtn');if(previewBtnResetWeeks)previewBtnResetWeeks.onclick=openOutputPreview;
