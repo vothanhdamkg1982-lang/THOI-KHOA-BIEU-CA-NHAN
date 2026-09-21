@@ -1110,19 +1110,18 @@ function gsWeek4Rows(data){
   const days=['Hai','Ba','Tư','Năm','Sáu'], labels=['Thứ hai','Thứ ba','Thứ tư','Thứ năm','Thứ sáu'];
   const concurrent=getConcurrentPeriods();
 
-  // BƯỚC 5.1.3I: khi ghi Google Sheet, tra lại trực tiếp Phụ lục 2 theo
-  // Môn + Khối + Tuần 4. Không phụ thuộc object plan trung gian của màn hình.
-  const freshPlan=x=>{
-    const subject=normalizeSubjectForPlan(x?.monHoc||x?.plan?.subject||'');
-    const grade=gradeFromClass(x?.lop||'');
-    return lessonPlanMap.get(planKey(subject,grade,4))||x?.plan||null;
-  };
+  // BƯỚC 5.1.3J: lấy chính dữ liệu bài dạy đã ghép đang dùng trong bản Xem trước.
+  // Không dựng lại tên bài bằng một đường dữ liệu khác.
   const lessonText=x=>{
     const subject=normalizeSubjectForPlan(x?.monHoc||x?.plan?.subject||'');
-    const plan=freshPlan(x);
+    const grade=gradeFromClass(x?.lop||'');
+    // outputScheduleData() vừa gọi applyLessonPlan(), vì vậy x.plan chính là dữ liệu
+    // đang tạo tên bài trong Xem trước. Chỉ fallback sang map nếu thật sự cần.
+    const plan=(x?.plan?.title ? x.plan : lessonPlanMap.get(planKey(subject,grade,4)))||null;
     const period=plan?.annualPeriod||plan?.week||4;
     const title=clean(plan?.title||'');
-    return `${subject} ${clean(x?.lop)} Tiết ${period}${title?` - ${title}`:' - [Chưa ghép Phụ lục 2]'}`;
+    if(!title) throw new Error(`Thiếu tên bài Phụ lục 2: ${subject} ${clean(x?.lop)} - Tuần 4.`);
+    return `${subject} ${clean(x?.lop)} Tiết ${period} - ${title}`;
   };
   const cell=(day,session,tiet)=>data
     .filter(x=>x.thu===day&&normKey(x.buoi)===normKey(session)&&Number(x.tiet)===Number(tiet))
@@ -1175,7 +1174,7 @@ function gsWeek4Rows(data){
 async function exportWeek4ToGoogleSheet(){
   const btn=document.querySelector('#outputPreviewModal .preview-google-write-week4'), old=btn?.textContent;
   try{
-    if(Number($('weekSelect')?.value)!==4)throw new Error('BƯỚC 5.1.3I chỉ cho phép ghi Tuần 4. Hãy chọn Tuần 4 trước.');
+    if(Number($('weekSelect')?.value)!==4)throw new Error('BƯỚC 5.1.3J chỉ cho phép ghi Tuần 4. Hãy chọn Tuần 4 trước.');
     const data=outputScheduleData(); if(!data.length)throw new Error('Tuần 4 hiện không có dữ liệu để ghi.');
     if(btn){btn.disabled=true;btn.textContent='Đang kiểm tra...';}
     const token=await getGoogleSheetsReadOnlyToken(), headers={Authorization:`Bearer ${token}`,'Content-Type':'application/json'};
@@ -1211,13 +1210,17 @@ async function exportWeek4ToGoogleSheet(){
     const verify=await gsJson(`${base}/values/${encodeURIComponent(q+'!A74:H95')}?majorDimension=ROWS`,{headers});
     const rows=verify.values||[], detected=[]; rows.forEach((r,i)=>{const w=googleSheetWeekFromLine((r||[]).join(' '));if(w!==null)detected.push({week:w,row:74+i});});
     if(!detected.some(x=>x.week===4))throw new Error('Đã gửi lệnh ghi nhưng chưa đọc lại được tiêu đề Tuần 4. Hãy kiểm tra Google Sheet trước khi thao tác tiếp.');
+    const writtenSchedule=(rows.slice(5,12)||[]).flat().map(clean).filter(Boolean).join('\n');
+    const expectedTitles=[...new Set(data.map(x=>clean((x.plan||lessonPlanMap.get(planKey(normalizeSubjectForPlan(x.monHoc),gradeFromClass(x.lop),4)))?.title||'')).filter(Boolean))];
+    const missingTitles=expectedTitles.filter(t=>!writtenSchedule.includes(t));
+    if(missingTitles.length)throw new Error(`BƯỚC 5.1.3J đã đọc lại Google Sheet nhưng còn thiếu tên bài: ${missingTitles.slice(0,3).join(' | ')}. Dừng tại Tuần 4.`);
     alert(`GHI TUẦN 4 THÀNH CÔNG\n\nTệp: ${meta.properties?.title||''}\nTab: ${title}\nGID: ${GOOGLE_SHEETS_TEACHER_GID}\nVùng ghi: dòng 74–95\nSố tiết: ${data.length}\nTổng kể cả kiêm nhiệm: ${data.length+getConcurrentPeriods()}\n\nTuần 1–3 không bị sửa. Hãy mở Google Sheet kiểm tra trực tiếp trước khi làm Tuần 5.`);
   }catch(err){console.error('[TKB] Ghi thật Tuần 4:',err);alert(`CHƯA GHI ĐƯỢC TUẦN 4\n\n${err?.message||err}\n\nKhông tiếp tục Tuần 5 cho đến khi Tuần 4 được kiểm tra.`)}
   finally{if(btn){btn.disabled=false;btn.textContent=old||'Ghi Tuần 4 vào Google Sheet';}}
 }
 function ensureGoogleSheetsWeek4WriteButton(){
   const bar=document.querySelector('#outputPreviewModal .output-preview-bar>div'); if(!bar||bar.querySelector('.preview-google-write-week4'))return;
-  const close=bar.querySelector('.preview-close'); const b=document.createElement('button'); b.type='button';b.className='preview-google-write-week4';b.textContent='Ghi Tuần 4 vào Google Sheet';b.title='BƯỚC 5.1.3I – ghi đầy đủ tên bài từ Phụ lục 2 và tính đúng Tổng hợp Tuần 4';b.onclick=exportWeek4ToGoogleSheet;bar.insertBefore(b,close||null);
+  const close=bar.querySelector('.preview-close'); const b=document.createElement('button'); b.type='button';b.className='preview-google-write-week4';b.textContent='Ghi Tuần 4 vào Google Sheet';b.title='BƯỚC 5.1.3J – ghi đúng tên bài đang hiển thị trong Xem trước và tự đọc lại kiểm tra';b.onclick=exportWeek4ToGoogleSheet;bar.insertBefore(b,close||null);
 }
 const openOutputPreviewBeforeWeek4Write=openOutputPreview;
 openOutputPreview=function(){openOutputPreviewBeforeWeek4Write();ensureGoogleSheetsWeek4WriteButton();};
