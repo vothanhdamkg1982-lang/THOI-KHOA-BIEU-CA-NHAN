@@ -1128,12 +1128,14 @@ function gsWeek4Rows(data){
   values.push({range:'C79:G85',values:schedule});
   values.push({range:'A86',values:[[`Tổng số: ${data.length} tiết`]]});
   // Bảng tổng hợp: chỉ ghi vào ô đầu của từng vùng merge có sẵn trong mẫu.
+  // 5.1.3E: bảng TỔNG HỢP của template Tuần 3 nằm ở dòng 89–93 sau khi dịch +23 dòng.
+  // Ghi đúng vào các ô đầu của vùng merge; không ghi đè lệch xuống dòng 91–95 như bản 5.1.3D.
   details.slice(0,4).forEach((x,i)=>{
-    values.push({range:`A${91+i}`,values:[[i+1]]});
-    values.push({range:`B${91+i}`,values:[[x[0]]]});
-    values.push({range:`E${91+i}`,values:[[x[1]]]});
+    values.push({range:`A${89+i}`,values:[[i+1]]});
+    values.push({range:`B${89+i}`,values:[[x[0]]]});
+    values.push({range:`E${89+i}`,values:[[x[1]]]});
   });
-  values.push({range:'B95',values:[['Tổng số']]}); values.push({range:'E95',values:[[data.length+concurrent]]});
+  values.push({range:'B93',values:[['Tổng số']]}); values.push({range:'E93',values:[[data.length+concurrent]]});
   return values;
 }
 async function exportWeek4ToGoogleSheet(){
@@ -1178,7 +1180,7 @@ async function exportWeek4ToGoogleSheet(){
 }
 function ensureGoogleSheetsWeek4WriteButton(){
   const bar=document.querySelector('#outputPreviewModal .output-preview-bar>div'); if(!bar||bar.querySelector('.preview-google-write-week4'))return;
-  const close=bar.querySelector('.preview-close'); const b=document.createElement('button'); b.type='button';b.className='preview-google-write-week4';b.textContent='Ghi Tuần 4 vào Google Sheet';b.title='BƯỚC 5.1.3B – sao chép nguyên mẫu Tuần 3 rồi thay dữ liệu Tuần 4';b.onclick=exportWeek4ToGoogleSheet;bar.insertBefore(b,close||null);
+  const close=bar.querySelector('.preview-close'); const b=document.createElement('button'); b.type='button';b.className='preview-google-write-week4';b.textContent='Ghi Tuần 4 vào Google Sheet';b.title='BƯỚC 5.1.3E – sao chép nguyên mẫu Tuần 3 và ghi đúng vị trí bảng tổng hợp Tuần 4';b.onclick=exportWeek4ToGoogleSheet;bar.insertBefore(b,close||null);
 }
 const openOutputPreviewBeforeWeek4Write=openOutputPreview;
 openOutputPreview=function(){openOutputPreviewBeforeWeek4Write();ensureGoogleSheetsWeek4WriteButton();};
