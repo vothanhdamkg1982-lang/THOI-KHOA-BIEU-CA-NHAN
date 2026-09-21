@@ -1511,6 +1511,15 @@ async function ensureIndependentGoogleSheetTemplate(base,headers,meta){
   await gsJson(`${base}:batchUpdate`,{method:'POST',headers,body:JSON.stringify({requests:[{updateSheetProperties:{properties:{sheetId:p.sheetId,hidden:true},fields:'hidden'}}]})});
   return {...p,hidden:true};
 }
+async function gsExactUnmergeRequests(base,headers,sheetTitle,sheetId,startRowIndex,endRowIndex,startColumnIndex,endColumnIndex){
+  const startRow=startRowIndex+1,endRow=endRowIndex;
+  const startCol=String.fromCharCode(65+startColumnIndex),endCol=String.fromCharCode(64+endColumnIndex);
+  const q=gsA1Title(sheetTitle);
+  const info=await gsJson(`${base}?ranges=${encodeURIComponent(q+`!${startCol}${startRow}:${endCol}${endRow}`)}&includeGridData=false&fields=sheets(merges)`,{headers});
+  return (info.sheets?.[0]?.merges||[])
+    .filter(m=>m.startRowIndex>=startRowIndex&&m.endRowIndex<=endRowIndex&&m.startColumnIndex>=startColumnIndex&&m.endColumnIndex<=endColumnIndex)
+    .map(m=>({unmergeCells:{range:{sheetId,startRowIndex:m.startRowIndex,endRowIndex:m.endRowIndex,startColumnIndex:m.startColumnIndex,endColumnIndex:m.endColumnIndex}}}));
+}
 async function exportSelectedWeek1To35ToGoogleSheet(){
   const week=Number($('weekSelect')?.value||0);
   const btn=document.querySelector('#outputPreviewModal .preview-google-write-week1-35'),old=btn?.textContent;
@@ -1576,23 +1585,23 @@ async function exportSelectedWeek1To35ToGoogleSheet(){
     const leftSubHeaderRow=leftHeaderRow+1;
     const leftScheduleStart=leftHeaderRow+2;
     const leftScheduleEnd=leftScheduleStart+7;
-    const leftReq=[
-      {unmergeCells:{range:{sheetId:GOOGLE_SHEETS_TEACHER_GID,startRowIndex:leftHeaderRow-1,endRowIndex:leftScheduleEnd-1,startColumnIndex:0,endColumnIndex:2}}},
+    const leftReq=await gsExactUnmergeRequests(base,headers,title,GOOGLE_SHEETS_TEACHER_GID,leftHeaderRow-1,leftScheduleEnd-1,0,2);
+    leftReq.push(
       {mergeCells:{range:{sheetId:GOOGLE_SHEETS_TEACHER_GID,startRowIndex:leftHeaderRow-1,endRowIndex:leftHeaderRow,startColumnIndex:0,endColumnIndex:2},mergeType:'MERGE_ALL'}},
       {mergeCells:{range:{sheetId:GOOGLE_SHEETS_TEACHER_GID,startRowIndex:leftScheduleStart-1,endRowIndex:leftScheduleStart+3,startColumnIndex:0,endColumnIndex:1},mergeType:'MERGE_ALL'}},
       {mergeCells:{range:{sheetId:GOOGLE_SHEETS_TEACHER_GID,startRowIndex:leftScheduleStart+3,endRowIndex:leftScheduleEnd-1,startColumnIndex:0,endColumnIndex:1},mergeType:'MERGE_ALL'}},
       {repeatCell:{range:{sheetId:GOOGLE_SHEETS_TEACHER_GID,startRowIndex:leftHeaderRow-1,endRowIndex:leftScheduleEnd-1,startColumnIndex:0,endColumnIndex:2},cell:{userEnteredFormat:{horizontalAlignment:'CENTER',verticalAlignment:'MIDDLE',wrapStrategy:'WRAP',textFormat:{fontFamily:'Times New Roman',fontSize:12}}},fields:'userEnteredFormat(horizontalAlignment,verticalAlignment,wrapStrategy,textFormat)'}},
       {repeatCell:{range:{sheetId:GOOGLE_SHEETS_TEACHER_GID,startRowIndex:leftHeaderRow-1,endRowIndex:leftSubHeaderRow,startColumnIndex:0,endColumnIndex:2},cell:{userEnteredFormat:{textFormat:{bold:true,fontFamily:'Times New Roman',fontSize:12}}},fields:'userEnteredFormat.textFormat'}},
       {repeatCell:{range:{sheetId:GOOGLE_SHEETS_TEACHER_GID,startRowIndex:leftScheduleStart-1,endRowIndex:leftScheduleEnd-1,startColumnIndex:0,endColumnIndex:2},cell:{userEnteredFormat:{borders:{top:{style:'SOLID'},bottom:{style:'SOLID'},left:{style:'SOLID'},right:{style:'SOLID'}}}},fields:'userEnteredFormat.borders'}}
-    ];
+    );
     await gsJson(`${base}:batchUpdate`,{method:'POST',headers,body:JSON.stringify({requests:leftReq})});
     if(specialWeek1){
       // BƯỚC 5.2.8: dựng đúng khối cuối Tuần 1 như Xem trước.
-      const sumReq=[
-        {unmergeCells:{range:{sheetId:GOOGLE_SHEETS_TEACHER_GID,startRowIndex:17,endRowIndex:25,startColumnIndex:1,endColumnIndex:8}}},
+      const sumReq=await gsExactUnmergeRequests(base,headers,title,GOOGLE_SHEETS_TEACHER_GID,17,25,1,8);
+      sumReq.push(
         {mergeCells:{range:{sheetId:GOOGLE_SHEETS_TEACHER_GID,startRowIndex:17,endRowIndex:18,startColumnIndex:1,endColumnIndex:8},mergeType:'MERGE_ALL'}},
         {mergeCells:{range:{sheetId:GOOGLE_SHEETS_TEACHER_GID,startRowIndex:18,endRowIndex:19,startColumnIndex:1,endColumnIndex:8},mergeType:'MERGE_ALL'}}
-      ];
+      );
       for(let rr=19;rr<25;rr++){
         sumReq.push({mergeCells:{range:{sheetId:GOOGLE_SHEETS_TEACHER_GID,startRowIndex:rr,endRowIndex:rr+1,startColumnIndex:2,endColumnIndex:4},mergeType:'MERGE_ALL'}});
         sumReq.push({mergeCells:{range:{sheetId:GOOGLE_SHEETS_TEACHER_GID,startRowIndex:rr,endRowIndex:rr+1,startColumnIndex:5,endColumnIndex:8},mergeType:'MERGE_ALL'}});
@@ -1606,11 +1615,11 @@ async function exportSelectedWeek1To35ToGoogleSheet(){
       // BƯỚC 5.2.10: chuẩn hóa phần cuối cho Tuần 2–35 theo đúng mẫu Tổng hợp đã Đạt của Tuần 1.
       // Mỗi khối tuần 22 dòng: r12 = Tổng số tiết dạy, r13 = TỔNG HỢP, r14 = tiêu đề, r15–r18 = chi tiết, r19 = Tổng số.
       const sr=startRow;
-      const sumReq=[
-        {unmergeCells:{range:{sheetId:GOOGLE_SHEETS_TEACHER_GID,startRowIndex:sr+11,endRowIndex:sr+20,startColumnIndex:1,endColumnIndex:8}}},
+      const sumReq=await gsExactUnmergeRequests(base,headers,title,GOOGLE_SHEETS_TEACHER_GID,sr+11,sr+20,1,8);
+      sumReq.push(
         {mergeCells:{range:{sheetId:GOOGLE_SHEETS_TEACHER_GID,startRowIndex:sr+11,endRowIndex:sr+12,startColumnIndex:1,endColumnIndex:8},mergeType:'MERGE_ALL'}},
         {mergeCells:{range:{sheetId:GOOGLE_SHEETS_TEACHER_GID,startRowIndex:sr+12,endRowIndex:sr+13,startColumnIndex:1,endColumnIndex:8},mergeType:'MERGE_ALL'}}
-      ];
+      );
       for(let rr=sr+13;rr<sr+20;rr++){
         sumReq.push({mergeCells:{range:{sheetId:GOOGLE_SHEETS_TEACHER_GID,startRowIndex:rr,endRowIndex:rr+1,startColumnIndex:2,endColumnIndex:4},mergeType:'MERGE_ALL'}});
         sumReq.push({mergeCells:{range:{sheetId:GOOGLE_SHEETS_TEACHER_GID,startRowIndex:rr,endRowIndex:rr+1,startColumnIndex:5,endColumnIndex:8},mergeType:'MERGE_ALL'}});
