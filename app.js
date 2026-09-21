@@ -1097,7 +1097,7 @@ const previewBtnGoogleReadOnly=document.getElementById('previewBtn');
 if(previewBtnGoogleReadOnly)previewBtnGoogleReadOnly.onclick=openOutputPreview;
 
 
-// BƯỚC 5.1.3H - GIỮ NGUYÊN TEMPLATE 5.1.3G, CHỈ SỬA LOGIC ĐẾM MÔN TRONG TỔNG HỢP TUẦN 4.
+// BƯỚC 5.1.3K - Tuần 4: ghi từ TKB nguồn thật, không dùng điều chỉnh xuất tạm; kiểm tra trùng tiết, cơ cấu môn và tên bài.
 // Chỉ ghi khi: đúng Spreadsheet, đúng tab/GID, đang chọn Tuần 4, Google Sheet chưa có Tuần 4.
 const GOOGLE_SHEETS_TEACHER_GID=1908030276;
 function gsA1Title(title){return `'${String(title).replace(/'/g,"''")}'`;}
@@ -1174,8 +1174,41 @@ function gsWeek4Rows(data){
 async function exportWeek4ToGoogleSheet(){
   const btn=document.querySelector('#outputPreviewModal .preview-google-write-week4'), old=btn?.textContent;
   try{
-    if(Number($('weekSelect')?.value)!==4)throw new Error('BƯỚC 5.1.3J chỉ cho phép ghi Tuần 4. Hãy chọn Tuần 4 trước.');
-    const data=outputScheduleData(); if(!data.length)throw new Error('Tuần 4 hiện không có dữ liệu để ghi.');
+    if(Number($('weekSelect')?.value)!==4)throw new Error('BƯỚC 5.1.3K chỉ cho phép ghi Tuần 4. Hãy chọn Tuần 4 trước.');
+    // 5.1.3K: Google Sheet là bản ghi thật nên lấy trực tiếp TKB nguồn + Phụ lục 2,
+    // KHÔNG dùng lớp điều chỉnh tạm của Xem trước (localStorage), tránh một chỉnh sửa cũ làm
+    // đổi môn/lớp hoặc tạo trùng tiết khi ghi sang Google Sheet.
+    applyLessonPlan();
+    const data=filterSchedule().map(x=>({...x}));
+    if(!data.length)throw new Error('Tuần 4 hiện không có dữ liệu TKB nguồn để ghi.');
+    if(data.length!==20)throw new Error(`DỪNG GHI: TKB nguồn Tuần 4 phải có đúng 20 tiết, hiện đọc được ${data.length} tiết.`);
+
+    // Một giáo viên không thể có hai lớp ở cùng Thứ + Buổi + Tiết. Nếu parser/source tạo trùng,
+    // dừng để không âm thầm ghi sai sang Google Sheet.
+    const slotMap=new Map();
+    for(const x of data){
+      const slot=`${clean(x.thu)}|${normKey(x.buoi)}|${Number(x.tiet)||0}`;
+      if(slotMap.has(slot)){
+        const a=slotMap.get(slot);
+        throw new Error(`DỪNG GHI: trùng vị trí Thứ ${x.thu} - ${x.buoi} - Tiết ${x.tiet}: ${normalizeSubjectForPlan(a.monHoc)} ${a.lop} và ${normalizeSubjectForPlan(x.monHoc)} ${x.lop}.`);
+      }
+      slotMap.set(slot,x);
+    }
+
+    // Chốt theo TKB thật đã đối chiếu của GV Đậm: 20 tiết = Tin học 7 + Công nghệ 12 + Đạo đức 1.
+    const subjectCount={tin:0,cn:0,dd:0};
+    for(const x of data){
+      const k=normKey(normalizeSubjectForPlan(x.monHoc)).replace(/[^a-z0-9]+/g,'');
+      if(k.includes('tinhoc')||k==='th')subjectCount.tin++;
+      else if(k.includes('congnghe')||k==='cn'||k==='cnghe')subjectCount.cn++;
+      else if(k.includes('daoduc')||k==='dd')subjectCount.dd++;
+    }
+    if(subjectCount.tin!==7||subjectCount.cn!==12||subjectCount.dd!==1)
+      throw new Error(`DỪNG GHI: cơ cấu môn Tuần 4 chưa đúng TKB thật. Hiện có Tin học ${subjectCount.tin}, Công nghệ ${subjectCount.cn}, Đạo đức ${subjectCount.dd}; yêu cầu 7 / 12 / 1.`);
+
+    // 20/20 tiết phải ghép được tên bài trước khi cho phép ghi.
+    const noTitle=data.filter(x=>!clean(x.plan?.title));
+    if(noTitle.length)throw new Error(`DỪNG GHI: còn ${noTitle.length} tiết chưa ghép tên bài Phụ lục 2: ${noTitle.slice(0,4).map(x=>`${normalizeSubjectForPlan(x.monHoc)} ${x.lop}`).join(', ')}.`);
     if(btn){btn.disabled=true;btn.textContent='Đang kiểm tra...';}
     const token=await getGoogleSheetsReadOnlyToken(), headers={Authorization:`Bearer ${token}`,'Content-Type':'application/json'};
     const base=`https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(GOOGLE_SHEETS_SPREADSHEET_ID)}`;
@@ -1200,6 +1233,8 @@ async function exportWeek4ToGoogleSheet(){
     ];
     srcMerges.forEach(m=>requests.push({mergeCells:{range:{sheetId:GOOGLE_SHEETS_TEACHER_GID,startRowIndex:m.startRowIndex+23,endRowIndex:m.endRowIndex+23,startColumnIndex:m.startColumnIndex,endColumnIndex:m.endColumnIndex},mergeType:'MERGE_ALL'}}));
     srcRowMeta.forEach((rm,i)=>{if(rm?.pixelSize)requests.push({updateDimensionProperties:{range:{sheetId:GOOGLE_SHEETS_TEACHER_GID,dimension:'ROWS',startIndex:73+i,endIndex:74+i},properties:{pixelSize:rm.pixelSize},fields:'pixelSize'}});});
+    // Tên bài dài hơn nhãn TKB ngắn: bảo đảm 7 dòng tiết 79–85 đủ cao để hiển thị nội dung đã wrap.
+    requests.push({updateDimensionProperties:{range:{sheetId:GOOGLE_SHEETS_TEACHER_GID,dimension:'ROWS',startIndex:78,endIndex:85},properties:{pixelSize:62},fields:'pixelSize'}});
     await gsJson(`${base}:batchUpdate`,{method:'POST',headers,body:JSON.stringify({requests})});
     // 5.1.3G: xóa CHỈ GIÁ TRỊ vùng dữ liệu Tổng hợp, giữ nguyên merge/viền/font/căn chỉnh vừa sao chép.
     // Xóa cả cột A để loại sạch các số/chữ rơi ngoài bảng do dữ liệu cũ của template.
@@ -1213,14 +1248,14 @@ async function exportWeek4ToGoogleSheet(){
     const writtenSchedule=(rows.slice(5,12)||[]).flat().map(clean).filter(Boolean).join('\n');
     const expectedTitles=[...new Set(data.map(x=>clean((x.plan||lessonPlanMap.get(planKey(normalizeSubjectForPlan(x.monHoc),gradeFromClass(x.lop),4)))?.title||'')).filter(Boolean))];
     const missingTitles=expectedTitles.filter(t=>!writtenSchedule.includes(t));
-    if(missingTitles.length)throw new Error(`BƯỚC 5.1.3J đã đọc lại Google Sheet nhưng còn thiếu tên bài: ${missingTitles.slice(0,3).join(' | ')}. Dừng tại Tuần 4.`);
+    if(missingTitles.length)throw new Error(`BƯỚC 5.1.3K đã đọc lại Google Sheet nhưng còn thiếu tên bài: ${missingTitles.slice(0,3).join(' | ')}. Dừng tại Tuần 4.`);
     alert(`GHI TUẦN 4 THÀNH CÔNG\n\nTệp: ${meta.properties?.title||''}\nTab: ${title}\nGID: ${GOOGLE_SHEETS_TEACHER_GID}\nVùng ghi: dòng 74–95\nSố tiết: ${data.length}\nTổng kể cả kiêm nhiệm: ${data.length+getConcurrentPeriods()}\n\nTuần 1–3 không bị sửa. Hãy mở Google Sheet kiểm tra trực tiếp trước khi làm Tuần 5.`);
   }catch(err){console.error('[TKB] Ghi thật Tuần 4:',err);alert(`CHƯA GHI ĐƯỢC TUẦN 4\n\n${err?.message||err}\n\nKhông tiếp tục Tuần 5 cho đến khi Tuần 4 được kiểm tra.`)}
   finally{if(btn){btn.disabled=false;btn.textContent=old||'Ghi Tuần 4 vào Google Sheet';}}
 }
 function ensureGoogleSheetsWeek4WriteButton(){
   const bar=document.querySelector('#outputPreviewModal .output-preview-bar>div'); if(!bar||bar.querySelector('.preview-google-write-week4'))return;
-  const close=bar.querySelector('.preview-close'); const b=document.createElement('button'); b.type='button';b.className='preview-google-write-week4';b.textContent='Ghi Tuần 4 vào Google Sheet';b.title='BƯỚC 5.1.3J – ghi đúng tên bài đang hiển thị trong Xem trước và tự đọc lại kiểm tra';b.onclick=exportWeek4ToGoogleSheet;bar.insertBefore(b,close||null);
+  const close=bar.querySelector('.preview-close'); const b=document.createElement('button'); b.type='button';b.className='preview-google-write-week4';b.textContent='Ghi Tuần 4 vào Google Sheet';b.title='BƯỚC 5.1.3K – ghi từ TKB nguồn thật, kiểm tra 20 tiết / Tin 7 / Công nghệ 12 / Đạo đức 1 / tên bài';b.onclick=exportWeek4ToGoogleSheet;bar.insertBefore(b,close||null);
 }
 const openOutputPreviewBeforeWeek4Write=openOutputPreview;
 openOutputPreview=function(){openOutputPreviewBeforeWeek4Write();ensureGoogleSheetsWeek4WriteButton();};
