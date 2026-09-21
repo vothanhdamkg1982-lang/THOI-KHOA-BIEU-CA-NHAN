@@ -1524,6 +1524,12 @@ async function exportSelectedWeek1To35ToGoogleSheet(){
     // Tuần 1: giữ nguyên PHỤ LỤC 1.4 ở hàng 4 và ghi lại đúng 3 dòng tiêu đề hàng 5–7;
     // chỉ làm sạch bảng hàng 8–26. Tuần 2–35 giữ nguyên vùng 22 dòng.
     await gsJson(`${base}/values/${encodeURIComponent(q+`!A${specialWeek1?8:startRow}:H${specialWeek1?26:endRow}`)}:clear`,{method:'POST',headers,body:'{}'});
+    // BƯỚC 5.2.7: Tuần 1 có tiêu đề cố định ở hàng 5–7 do mẫu đã sao chép.
+    // Xóa riêng các ô mép trái từng bị ghi dư và dòng Tổng số dư bên dưới bảng tổng hợp.
+    if(specialWeek1){
+      await gsJson(`${base}/values/${encodeURIComponent(q+'!A5:A7')}:clear`,{method:'POST',headers,body:'{}'});
+      await gsJson(`${base}/values/${encodeURIComponent(q+'!A27:H27')}:clear`,{method:'POST',headers,body:'{}'});
+    }
     let weekRows=gsWeekRows(data,week,startRow);
     if(specialWeek1){
       const wd=selectedWeekDates();
@@ -1534,17 +1540,19 @@ async function exportSelectedWeek1To35ToGoogleSheet(){
         if(row>=startRow+3)return {...x,range:String(x.range).replace(/(\d+)/g,n=>String(Number(n)-3))};
         return null;
       }).filter(Boolean);
+      // Hàng 5 và 7 đã có tiêu đề căn giữa từ mẫu chuẩn; không ghi A5/A7 vì sẽ tạo chữ thừa ở mép trái.
+      // Chỉ cập nhật dòng năm học/môn tại đúng vùng tiêu đề chính.
       weekRows.unshift(
-        {range:'A5',values:[[`Hoạt động giáo dục tuần ${String(week).padStart(2,'0')}`]]},
-        {range:'A6',values:[['']]},
-        {range:'B6',values:[['Năm học 2026 – 2027. Môn: Tin học, Công nghệ, Đạo đức – Khối: 3, 4, 5 – Trường TH – THCS & THPT Lại Sơn']]},
-        {range:'A7',values:[[`Tuần ${week}: từ ngày ${wd.fmt(wd.start)} đến ${wd.fmt(wd.end)}`]]}
+        {range:'B6',values:[['Năm học 2026 – 2027. Môn: Tin học, Công nghệ, Đạo đức – Khối: 3, 4, 5 – Trường TH – THCS & THPT Lại Sơn']]}
       );
     }
     const payload=weekRows.map(x=>({range:`${q}!${x.range}`,majorDimension:'ROWS',values:x.values}));await gsJson(`${base}/values:batchUpdate`,{method:'POST',headers,body:JSON.stringify({valueInputOption:'USER_ENTERED',data:payload})});
-    const verify=await gsJson(`${base}/values/${encodeURIComponent(q+`!A${startRow}:H${endRow}`)}?majorDimension=ROWS`,{headers}),rows=verify.values||[];
+    // BƯỚC 5.2.7: với Tuần 1, tiêu đề tuần nằm ở hàng 5–7, ngoài vùng A8:H29.
+    // Đọc đúng vùng tiêu đề để xác minh, tránh báo thất bại giả sau khi Google Sheet đã ghi thành công.
+    const verifyRange=specialWeek1?'A4:H27':`A${startRow}:H${endRow}`;
+    const verify=await gsJson(`${base}/values/${encodeURIComponent(q+'!'+verifyRange)}?majorDimension=ROWS`,{headers}),rows=verify.values||[];
     if(!rows.some(r=>googleSheetWeekFromLine((r||[]).join(' '))===week))throw new Error(`Đã gửi lệnh nhưng chưa đọc lại được tiêu đề Tuần ${week}.`);
-    const writtenSchedule=(rows.slice(5,12)||[]).flat().map(clean).filter(Boolean).join('\n'),expectedTitles=[...new Set(data.map(x=>clean(x.plan?.title||'')).filter(Boolean))],missingTitles=expectedTitles.filter(t=>!writtenSchedule.includes(t));if(missingTitles.length)throw new Error(`Google Sheet còn thiếu tên bài: ${missingTitles.slice(0,3).join(' | ')}.`);
+    const writtenSchedule=(specialWeek1?(rows.slice(6,13)||[]):(rows.slice(5,12)||[])).flat().map(clean).filter(Boolean).join('\n'),expectedTitles=[...new Set(data.map(x=>clean(x.plan?.title||'')).filter(Boolean))],missingTitles=expectedTitles.filter(t=>!writtenSchedule.includes(t));if(missingTitles.length)throw new Error(`Google Sheet còn thiếu tên bài: ${missingTitles.slice(0,3).join(' | ')}.`);
     alert(`${action} TUẦN ${week} THÀNH CÔNG\n\nVùng: dòng ${startRow}–${endRow}\nSố tiết theo TKB có hiệu lực: ${data.length}\nTổng kể cả kiêm nhiệm: ${data.length+getConcurrentPeriods()}\n\nMẫu định dạng đã độc lập với Tuần 1–35.`);
   }catch(err){console.error(`[TKB] 5.2.2A Tuần ${week}:`,err);alert(`CHƯA GHI ĐƯỢC TUẦN ${week||''}\n\n${err?.message||err}`);}finally{if(btn){btn.disabled=false;btn.textContent=old||`Ghi/Cập nhật Tuần ${week||1} vào Google Sheet`;}}
 }
