@@ -1679,11 +1679,31 @@ const openOutputPreviewBeforeWeek1To35Write=openOutputPreview;
 openOutputPreview=function(){openOutputPreviewBeforeWeek1To35Write();ensureGoogleSheetsWeek1To35WriteButton();};
 const previewBtnWeek1To35Write=document.getElementById('previewBtn');if(previewBtnWeek1To35Write)previewBtnWeek1To35Write.onclick=openOutputPreview;
 
-// BƯỚC 5.2.9 - Làm mới sạch Tuần 1–35 trên Google Sheet.
-// Xóa dữ liệu + merge + định dạng bảng trong A8:H777 của đúng tab giáo viên đã xác minh.
-// Giữ nguyên phần đầu A1:H7, kích thước cột và tab mẫu ẩn; tuần nào ghi lại sẽ được dựng từ mẫu ẩn.
-async function resetGoogleSheetWeeks1To35(){
+// BƯỚC 5.2.14 - Làm mới Google Sheet theo tuần / vùng tuần / toàn bộ 1–35.
+// Mỗi tuần chiếm đúng 22 dòng: startRow = 8 + 22 * (week - 1).
+// Chỉ làm sạch vùng được chọn; giữ A1:H7, kích thước cột và tab mẫu ẩn.
+function googleSheetResetWeekRange(firstWeek,lastWeek){
+  const a=Math.max(1,Math.min(35,Number(firstWeek)||1)),b=Math.max(1,Math.min(35,Number(lastWeek)||a));
+  const from=Math.min(a,b),to=Math.max(a,b),startRow=8+22*(from-1),endRow=8+22*to-1;
+  return {from,to,startRow,endRow};
+}
+function closeGoogleSheetResetDialog(){document.getElementById('googleSheetResetRangeModal')?.remove();}
+function openGoogleSheetResetDialog(){
+  closeGoogleSheetResetDialog();
+  const current=Math.max(1,Math.min(35,Number($('weekSelect')?.value||1)));
+  const modal=document.createElement('div');modal.id='googleSheetResetRangeModal';
+  modal.innerHTML=`<div class="gs-reset-card"><div class="gs-reset-head"><div><b>LÀM MỚI GOOGLE SHEET</b><span>Chỉ làm sạch đúng tuần hoặc vùng tuần bạn chọn.</span></div><button type="button" class="gs-reset-x" aria-label="Đóng">×</button></div><div class="gs-reset-body"><label class="gs-reset-option"><input type="radio" name="gsResetMode" value="current" checked><span><b>Tuần hiện tại</b><small>Tuần ${current}</small></span></label><label class="gs-reset-option"><input type="radio" name="gsResetMode" value="single"><span><b>Một tuần cụ thể</b><small>Chọn một tuần từ 1 đến 35</small></span></label><div class="gs-reset-fields" data-mode="single"><label>Tuần<select class="gs-reset-single">${Array.from({length:35},(_,i)=>`<option value="${i+1}" ${i+1===current?'selected':''}>Tuần ${i+1}</option>`).join('')}</select></label></div><label class="gs-reset-option"><input type="radio" name="gsResetMode" value="range"><span><b>Một vùng tuần</b><small>Ví dụ Tuần 10 → Tuần 20</small></span></label><div class="gs-reset-fields" data-mode="range"><label>Từ<select class="gs-reset-from">${Array.from({length:35},(_,i)=>`<option value="${i+1}">Tuần ${i+1}</option>`).join('')}</select></label><label>Đến<select class="gs-reset-to">${Array.from({length:35},(_,i)=>`<option value="${i+1}" ${i+1===35?'selected':''}>Tuần ${i+1}</option>`).join('')}</select></label></div><label class="gs-reset-option gs-reset-all"><input type="radio" name="gsResetMode" value="all"><span><b>Toàn bộ Tuần 1–35</b><small>Dùng khi cần làm sạch toàn bộ vùng kế hoạch</small></span></label><div class="gs-reset-note">TKB, Phụ lục 2 và các tuần ngoài phạm vi đã chọn không bị thay đổi.</div></div><div class="gs-reset-actions"><button type="button" class="gs-reset-cancel">Hủy</button><button type="button" class="gs-reset-run">Làm mới vùng đã chọn</button></div></div>`;
+  document.body.appendChild(modal);
+  const style=document.createElement('style');style.textContent=`#googleSheetResetRangeModal{position:fixed;inset:0;z-index:10050;background:rgba(15,23,42,.42);display:grid;place-items:center;padding:20px;font-family:Arial,sans-serif}.gs-reset-card{width:min(560px,96vw);background:#fff;border-radius:16px;box-shadow:0 24px 70px rgba(15,23,42,.25);overflow:hidden}.gs-reset-head{display:flex;justify-content:space-between;gap:16px;align-items:flex-start;padding:20px 22px 16px;border-bottom:1px solid #e2e8f0}.gs-reset-head b{display:block;color:#123f68;font-size:17px}.gs-reset-head span{display:block;margin-top:5px;color:#64748b;font-size:13px}.gs-reset-x{border:0;background:#f1f5f9;width:34px;height:34px;border-radius:9px;font-size:22px;cursor:pointer;color:#475569}.gs-reset-body{padding:16px 22px}.gs-reset-option{display:flex;align-items:center;gap:11px;padding:10px 12px;border:1px solid #e2e8f0;border-radius:10px;margin:7px 0;cursor:pointer}.gs-reset-option:has(input:checked){border-color:#7db3df;background:#f0f7ff}.gs-reset-option input{accent-color:#0f4c81}.gs-reset-option span{display:flex;flex-direction:column;gap:2px}.gs-reset-option b{font-size:14px;color:#1e293b}.gs-reset-option small{font-size:12px;color:#64748b}.gs-reset-fields{display:none;gap:12px;padding:3px 12px 8px 38px}.gs-reset-fields label{font-size:12px;color:#475569;font-weight:700;display:flex;align-items:center;gap:8px}.gs-reset-fields select{height:34px;border:1px solid #cbd5e1;border-radius:8px;padding:0 9px;background:#fff}.gs-reset-note{margin-top:13px;padding:10px 12px;background:#f8fafc;border-radius:9px;color:#475569;font-size:12px}.gs-reset-actions{display:flex;justify-content:flex-end;gap:9px;padding:14px 22px 18px;border-top:1px solid #e2e8f0}.gs-reset-actions button{height:38px;border-radius:9px;padding:0 16px;font-weight:700;cursor:pointer}.gs-reset-cancel{background:#fff;border:1px solid #cbd5e1;color:#475569}.gs-reset-run{background:#0f4c81;border:1px solid #0f4c81;color:#fff}`;modal.appendChild(style);
+  const refresh=()=>{const mode=modal.querySelector('input[name="gsResetMode"]:checked')?.value;modal.querySelectorAll('.gs-reset-fields').forEach(x=>x.style.display=x.dataset.mode===mode?'flex':'none');};
+  modal.querySelectorAll('input[name="gsResetMode"]').forEach(x=>x.onchange=refresh);refresh();
+  modal.querySelector('.gs-reset-x').onclick=modal.querySelector('.gs-reset-cancel').onclick=closeGoogleSheetResetDialog;
+  modal.addEventListener('click',e=>{if(e.target===modal)closeGoogleSheetResetDialog();});
+  modal.querySelector('.gs-reset-run').onclick=()=>{const mode=modal.querySelector('input[name="gsResetMode"]:checked')?.value;let from=current,to=current;if(mode==='single')from=to=Number(modal.querySelector('.gs-reset-single').value);else if(mode==='range'){from=Number(modal.querySelector('.gs-reset-from').value);to=Number(modal.querySelector('.gs-reset-to').value);}else if(mode==='all'){from=1;to=35;}closeGoogleSheetResetDialog();resetGoogleSheetWeekRange(from,to);};
+}
+async function resetGoogleSheetWeekRange(firstWeek,lastWeek){
   const btn=document.querySelector('#outputPreviewModal .preview-google-reset-weeks'),old=btn?.textContent;
+  const rg=googleSheetResetWeekRange(firstWeek,lastWeek);
   try{
     if(btn){btn.disabled=true;btn.textContent='Đang kiểm tra...';}
     const token=await getGoogleSheetsReadOnlyToken(),headers={Authorization:`Bearer ${token}`,'Content-Type':'application/json'},base=`https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(GOOGLE_SHEETS_SPREADSHEET_ID)}`;
@@ -1691,32 +1711,30 @@ async function resetGoogleSheetWeeks1To35(){
     const teacher=(meta.sheets||[]).find(s=>Number(s?.properties?.sheetId)===GOOGLE_SHEETS_TEACHER_GID);
     if(!teacher||googleSheetNameKey(teacher.properties.title)!==googleSheetNameKey(GOOGLE_SHEETS_TEACHER_NAME))throw new Error(`DỪNG LÀM MỚI: không khớp tab ${GOOGLE_SHEETS_TEACHER_NAME} / GID ${GOOGLE_SHEETS_TEACHER_GID}.`);
     const title=teacher.properties.title,q=gsA1Title(title),maxRows=Number(teacher.properties?.gridProperties?.rowCount)||0;
-    if(maxRows<777)throw new Error(`Google Sheet hiện chỉ có ${maxRows} dòng. Cần ít nhất 777 dòng để quản lý đủ Tuần 1–35.`);
-    const tpl=await ensureIndependentGoogleSheetTemplate(base,headers,meta);
-    if(!tpl?.sheetId)throw new Error('Chưa bảo đảm được tab mẫu ẩn. App dừng trước khi xóa dữ liệu.');
-    const ok1=confirm(`LÀM MỚI SẠCH TUẦN 1–35 trên tab ${title}?\n\nApp sẽ xóa dữ liệu, đường viền, màu nền và ô gộp của các bảng trong vùng A8:H777 trên CHÍNH tab này.\nPhần đầu A1:H7, kích thước cột và tab mẫu ẩn vẫn được giữ nguyên.\nCác tab giáo viên khác không bị tác động.`);
-    if(!ok1)return;
-    const ok2=confirm(`XÁC NHẬN LẦN CUỐI\n\nToàn bộ dữ liệu Tuần 1–35 hiện có trên tab ${title} sẽ bị xóa để ghi lại từ Tuần 1.\n\nChọn OK để thực hiện.`);
-    if(!ok2)return;
-    if(btn)btn.textContent='Đang làm mới sạch Tuần 1–35...';
-    // Xóa giá trị trước, sau đó bỏ toàn bộ merge và định dạng bảng trong vùng tuần.
-    // Không đụng A1:H7 và không đổi chiều rộng cột; tab mẫu ẩn vẫn là nguồn dựng lại từng tuần.
-    await gsJson(`${base}/values/${encodeURIComponent(q+'!A8:H777')}:clear`,{method:'POST',headers,body:'{}'});
+    if(maxRows<rg.endRow)throw new Error(`Google Sheet hiện chỉ có ${maxRows} dòng, không đủ vùng cần làm mới đến dòng ${rg.endRow}.`);
+    const tpl=await ensureIndependentGoogleSheetTemplate(base,headers,meta);if(!tpl?.sheetId)throw new Error('Chưa bảo đảm được tab mẫu ẩn. App dừng trước khi xóa dữ liệu.');
+    const label=rg.from===rg.to?`Tuần ${rg.from}`:`Tuần ${rg.from}–${rg.to}`;
+    const ok=confirm(`LÀM MỚI ${label} trên tab ${title}?\n\nChỉ vùng A${rg.startRow}:H${rg.endRow} được làm sạch.\nCác tuần ngoài phạm vi này, A1:H7 và tab mẫu ẩn được giữ nguyên.\n\nChọn OK để thực hiện.`);if(!ok)return;
+    if(btn)btn.textContent=`Đang làm mới ${label}...`;
+    await gsJson(`${base}/values/${encodeURIComponent(q+`!A${rg.startRow}:H${rg.endRow}`)}:clear`,{method:'POST',headers,body:'{}'});
     await gsJson(`${base}:batchUpdate`,{method:'POST',headers,body:JSON.stringify({requests:[
-      {unmergeCells:{range:{sheetId:GOOGLE_SHEETS_TEACHER_GID,startRowIndex:7,endRowIndex:777,startColumnIndex:0,endColumnIndex:8}}},
-      {repeatCell:{range:{sheetId:GOOGLE_SHEETS_TEACHER_GID,startRowIndex:7,endRowIndex:777,startColumnIndex:0,endColumnIndex:8},cell:{userEnteredFormat:{}},fields:'userEnteredFormat'}},
-      {updateCells:{range:{sheetId:GOOGLE_SHEETS_TEACHER_GID,startRowIndex:7,endRowIndex:777,startColumnIndex:0,endColumnIndex:8},rows:[],fields:'note,dataValidation'}}
+      {unmergeCells:{range:{sheetId:GOOGLE_SHEETS_TEACHER_GID,startRowIndex:rg.startRow-1,endRowIndex:rg.endRow,startColumnIndex:0,endColumnIndex:8}}},
+      {repeatCell:{range:{sheetId:GOOGLE_SHEETS_TEACHER_GID,startRowIndex:rg.startRow-1,endRowIndex:rg.endRow,startColumnIndex:0,endColumnIndex:8},cell:{userEnteredFormat:{}},fields:'userEnteredFormat'}},
+      {updateCells:{range:{sheetId:GOOGLE_SHEETS_TEACHER_GID,startRowIndex:rg.startRow-1,endRowIndex:rg.endRow,startColumnIndex:0,endColumnIndex:8},rows:[],fields:'note,dataValidation'}}
     ]})});
-    const verify=await gsJson(`${base}/values/${encodeURIComponent(q+'!A8:H777')}?majorDimension=ROWS`,{headers});
-    const remain=[];(verify.values||[]).forEach((r,i)=>{const w=googleSheetWeekFromLine((r||[]).join(' '));if(w!==null)remain.push({week:w,row:8+i});});
-    if(remain.length)throw new Error(`Đã gửi lệnh làm mới nhưng vẫn còn nhận diện tuần tại dòng ${remain.slice(0,3).map(x=>x.row).join(', ')}.`);
-    alert(`LÀM MỚI SẠCH TUẦN 1–35 THÀNH CÔNG\n\nTab: ${title}\nVùng đã làm sạch hoàn toàn: A8:H777\nĐã xóa các bảng/đường viền/merge thừa.\nPhần đầu A1:H7 và tab mẫu ẩn vẫn được giữ nguyên.\n\nBây giờ hãy chọn Tuần 1 → Xem trước → Ghi/Cập nhật Tuần 1 vào Google Sheet.`);
-  }catch(err){console.error('[TKB] 5.2.4 Làm mới Tuần 1–35:',err);alert(`CHƯA LÀM MỚI GOOGLE SHEET\n\n${err?.message||err}\n\nKhông có lệnh ghi tuần nào được thực hiện.`);}finally{if(btn){btn.disabled=false;btn.textContent=old||'Làm mới Tuần 1–35';}}
+    const verify=await gsJson(`${base}/values/${encodeURIComponent(q+`!A${rg.startRow}:H${rg.endRow}`)}?majorDimension=ROWS`,{headers});
+    const remain=[];(verify.values||[]).forEach((r,i)=>{if((r||[]).some(v=>clean(v)!==''))remain.push(rg.startRow+i);});if(remain.length)throw new Error(`Vẫn còn dữ liệu trong vùng làm mới tại dòng ${remain.slice(0,3).join(', ')}.`);
+    alert(`LÀM MỚI ${label.toUpperCase()} THÀNH CÔNG\n\nTab: ${title}\nVùng đã làm sạch: A${rg.startRow}:H${rg.endRow}\nCác tuần ngoài phạm vi được giữ nguyên.\n\nBạn có thể chọn tuần cần dùng → Xem trước → Ghi/Cập nhật vào Google Sheet.`);
+  }catch(err){console.error('[TKB] 5.2.14 Làm mới theo phạm vi:',err);alert(`CHƯA LÀM MỚI GOOGLE SHEET\n\n${err?.message||err}\n\nKhông có lệnh ghi tuần nào được thực hiện.`);}finally{if(btn){btn.disabled=false;btn.textContent=old||'Làm mới';}}
 }
+function resetGoogleSheetWeeks1To35(){openGoogleSheetResetDialog();}
 function ensureGoogleSheetsResetWeeksButton(){
   const bar=document.querySelector('#outputPreviewModal .output-preview-bar>div');if(!bar)return;
   let b=bar.querySelector('.preview-google-reset-weeks');
-  if(!b){const write=bar.querySelector('.preview-google-write-week1-35'),close=bar.querySelector('.preview-close');b=document.createElement('button');b.type='button';b.className='preview-google-reset-weeks';b.textContent='Làm mới Tuần 1–35';b.title='BƯỚC 5.2.9 – làm mới sạch Tuần 1–35: xóa dữ liệu và các bảng thừa, giữ phần đầu và mẫu ẩn';b.onclick=resetGoogleSheetWeeks1To35;bar.insertBefore(b,write||close||null);}
+  if(!b){const write=bar.querySelector('.preview-google-write-week1-35'),close=bar.querySelector('.preview-close');b=document.createElement('button');b.type='button';b.className='preview-google-reset-weeks';b.textContent='Làm mới';b.title='Làm mới tuần hiện tại, một tuần, một vùng tuần hoặc toàn bộ Tuần 1–35';b.onclick=openGoogleSheetResetDialog;bar.insertBefore(b,write||close||null);}
+  // Nút O-R1 là công cụ kiểm tra kỹ thuật cũ; giữ logic nhưng không để chiếm chỗ trên thanh thao tác chính.
+  bar.querySelector('.preview-google-readonly')?.remove();
+  if(!document.getElementById('previewActionPolish')){const st=document.createElement('style');st.id='previewActionPolish';st.textContent=`#outputPreviewModal .output-preview-bar{padding:10px 14px;gap:12px}#outputPreviewModal .output-preview-bar>div{gap:7px!important;justify-content:flex-end}#outputPreviewModal .output-preview-bar button{height:36px!important;border-radius:9px!important;padding:0 13px!important;white-space:nowrap;font-weight:700!important}#outputPreviewModal .preview-google-write-week1-35{background:#0f4c81!important;color:#fff!important;border-color:#0f4c81!important}#outputPreviewModal .preview-google-reset-weeks{background:#fff7ed!important;color:#9a4b0a!important;border-color:#fdba74!important}#outputPreviewModal .preview-close{margin-left:2px;background:#f8fafc!important}`;document.head.appendChild(st);}
 }
 const openOutputPreviewBeforeResetWeeks=openOutputPreview;
 openOutputPreview=function(){openOutputPreviewBeforeResetWeeks();ensureGoogleSheetsResetWeeksButton();};
