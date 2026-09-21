@@ -1097,7 +1097,7 @@ const previewBtnGoogleReadOnly=document.getElementById('previewBtn');
 if(previewBtnGoogleReadOnly)previewBtnGoogleReadOnly.onclick=openOutputPreview;
 
 
-// BƯỚC 5.1.3G - GIỮ TEMPLATE TUẦN 3, LÀM SẠCH GIÁ TRỊ KHỐI TỔNG HỢP RỒI GHI LẠI TUẦN 4.
+// BƯỚC 5.1.3H - GIỮ NGUYÊN TEMPLATE 5.1.3G, CHỈ SỬA LOGIC ĐẾM MÔN TRONG TỔNG HỢP TUẦN 4.
 // Chỉ ghi khi: đúng Spreadsheet, đúng tab/GID, đang chọn Tuần 4, Google Sheet chưa có Tuần 4.
 const GOOGLE_SHEETS_TEACHER_GID=1908030276;
 function gsA1Title(title){return `'${String(title).replace(/'/g,"''")}'`;}
@@ -1110,7 +1110,22 @@ function gsWeek4Rows(data){
   const days=['Hai','Ba','Tư','Năm','Sáu'], labels=['Thứ hai','Thứ ba','Thứ tư','Thứ năm','Thứ sáu'];
   const cell=(day,session,tiet)=>excelLessonCellFormal(data,day,session,tiet);
   const concurrent=getConcurrentPeriods();
-  const subjectCount=name=>data.filter(x=>normalizeSubjectForPlan(x.monHoc)===name).length;
+  // 5.1.3H: dữ liệu TKB có thể mang tên môn theo nhiều dạng/hoa-thường khác nhau.
+  // Đếm theo khóa chuẩn hóa, ưu tiên cả monHoc và subject đã ghép từ Phụ lục 2.
+  const subjectKey=x=>normKey(normalizeSubjectForPlan(x?.monHoc||x?.plan?.subject||''))
+    .replace(/[^a-z0-9]+/g,'');
+  const wantedKey=name=>normKey(name).replace(/[^a-z0-9]+/g,'');
+  const subjectCount=name=>{
+    const wanted=wantedKey(name);
+    return data.filter(x=>{
+      const keys=[
+        subjectKey(x),
+        normKey(x?.monHoc||'').replace(/[^a-z0-9]+/g,''),
+        normKey(x?.plan?.subject||'').replace(/[^a-z0-9]+/g,'')
+      ].filter(Boolean);
+      return keys.some(k=>k===wanted || k.startsWith(wanted) || wanted.startsWith(k));
+    }).length;
+  };
   // Mẫu nhà trường cố định 4 dòng: Phòng máy, Công nghệ, Tin học, Đạo đức.
   // Phòng máy là phần kiêm nhiệm; ba dòng còn lại lấy số tiết thật của Tuần 4.
   const details=[
@@ -1143,7 +1158,7 @@ function gsWeek4Rows(data){
 async function exportWeek4ToGoogleSheet(){
   const btn=document.querySelector('#outputPreviewModal .preview-google-write-week4'), old=btn?.textContent;
   try{
-    if(Number($('weekSelect')?.value)!==4)throw new Error('BƯỚC 5.1.3G chỉ cho phép ghi Tuần 4. Hãy chọn Tuần 4 trước.');
+    if(Number($('weekSelect')?.value)!==4)throw new Error('BƯỚC 5.1.3H chỉ cho phép ghi Tuần 4. Hãy chọn Tuần 4 trước.');
     const data=outputScheduleData(); if(!data.length)throw new Error('Tuần 4 hiện không có dữ liệu để ghi.');
     if(btn){btn.disabled=true;btn.textContent='Đang kiểm tra...';}
     const token=await getGoogleSheetsReadOnlyToken(), headers={Authorization:`Bearer ${token}`,'Content-Type':'application/json'};
@@ -1185,7 +1200,7 @@ async function exportWeek4ToGoogleSheet(){
 }
 function ensureGoogleSheetsWeek4WriteButton(){
   const bar=document.querySelector('#outputPreviewModal .output-preview-bar>div'); if(!bar||bar.querySelector('.preview-google-write-week4'))return;
-  const close=bar.querySelector('.preview-close'); const b=document.createElement('button'); b.type='button';b.className='preview-google-write-week4';b.textContent='Ghi Tuần 4 vào Google Sheet';b.title='BƯỚC 5.1.3G – giữ nguyên định dạng mẫu Tuần 3, làm sạch giá trị vùng Tổng hợp rồi ghi dữ liệu Tuần 4';b.onclick=exportWeek4ToGoogleSheet;bar.insertBefore(b,close||null);
+  const close=bar.querySelector('.preview-close'); const b=document.createElement('button'); b.type='button';b.className='preview-google-write-week4';b.textContent='Ghi Tuần 4 vào Google Sheet';b.title='BƯỚC 5.1.3H – giữ nguyên mẫu, sửa logic đếm số tiết theo môn trong Tổng hợp Tuần 4';b.onclick=exportWeek4ToGoogleSheet;bar.insertBefore(b,close||null);
 }
 const openOutputPreviewBeforeWeek4Write=openOutputPreview;
 openOutputPreview=function(){openOutputPreviewBeforeWeek4Write();ensureGoogleSheetsWeek4WriteButton();};
