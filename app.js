@@ -1097,7 +1097,7 @@ const previewBtnGoogleReadOnly=document.getElementById('previewBtn');
 if(previewBtnGoogleReadOnly)previewBtnGoogleReadOnly.onclick=openOutputPreview;
 
 
-// BƯỚC 5.1.3B - GHI THẬT TUẦN 4 THEO TEMPLATE 1:1 CỦA TUẦN 3.
+// BƯỚC 5.1.3F - GHI THẬT TUẦN 4 THEO TEMPLATE 1:1 CỦA TUẦN 3.
 // Chỉ ghi khi: đúng Spreadsheet, đúng tab/GID, đang chọn Tuần 4, Google Sheet chưa có Tuần 4.
 const GOOGLE_SHEETS_TEACHER_GID=1908030276;
 function gsA1Title(title){return `'${String(title).replace(/'/g,"''")}'`;}
@@ -1131,8 +1131,10 @@ function gsWeek4Rows(data){
   // 5.1.3E: bảng TỔNG HỢP của template Tuần 3 nằm ở dòng 89–93 sau khi dịch +23 dòng.
   // Ghi đúng vào các ô đầu của vùng merge; không ghi đè lệch xuống dòng 91–95 như bản 5.1.3D.
   details.slice(0,4).forEach((x,i)=>{
-    values.push({range:`A${89+i}`,values:[[i+1]]});
-    values.push({range:`B${89+i}`,values:[[x[0]]]});
+    // Template thật: cột B = TT, C:D = Nội dung (merge, ghi tại C), E = Số lượng tiết học.
+    // Không ghi vào A/B như 5.1.3E vì sẽ tạo chữ/số rơi ra ngoài bảng.
+    values.push({range:`B${89+i}`,values:[[i+1]]});
+    values.push({range:`C${89+i}`,values:[[x[0]]]});
     values.push({range:`E${89+i}`,values:[[x[1]]]});
   });
   values.push({range:'B93',values:[['Tổng số']]}); values.push({range:'E93',values:[[data.length+concurrent]]});
@@ -1141,7 +1143,7 @@ function gsWeek4Rows(data){
 async function exportWeek4ToGoogleSheet(){
   const btn=document.querySelector('#outputPreviewModal .preview-google-write-week4'), old=btn?.textContent;
   try{
-    if(Number($('weekSelect')?.value)!==4)throw new Error('BƯỚC 5.1.3B chỉ cho phép ghi Tuần 4. Hãy chọn Tuần 4 trước.');
+    if(Number($('weekSelect')?.value)!==4)throw new Error('BƯỚC 5.1.3F chỉ cho phép ghi Tuần 4. Hãy chọn Tuần 4 trước.');
     const data=outputScheduleData(); if(!data.length)throw new Error('Tuần 4 hiện không có dữ liệu để ghi.');
     if(btn){btn.disabled=true;btn.textContent='Đang kiểm tra...';}
     const token=await getGoogleSheetsReadOnlyToken(), headers={Authorization:`Bearer ${token}`,'Content-Type':'application/json'};
@@ -1180,7 +1182,7 @@ async function exportWeek4ToGoogleSheet(){
 }
 function ensureGoogleSheetsWeek4WriteButton(){
   const bar=document.querySelector('#outputPreviewModal .output-preview-bar>div'); if(!bar||bar.querySelector('.preview-google-write-week4'))return;
-  const close=bar.querySelector('.preview-close'); const b=document.createElement('button'); b.type='button';b.className='preview-google-write-week4';b.textContent='Ghi Tuần 4 vào Google Sheet';b.title='BƯỚC 5.1.3E – sao chép nguyên mẫu Tuần 3 và ghi đúng vị trí bảng tổng hợp Tuần 4';b.onclick=exportWeek4ToGoogleSheet;bar.insertBefore(b,close||null);
+  const close=bar.querySelector('.preview-close'); const b=document.createElement('button'); b.type='button';b.className='preview-google-write-week4';b.textContent='Ghi Tuần 4 vào Google Sheet';b.title='BƯỚC 5.1.3F – sao chép nguyên mẫu Tuần 3 1:1 và chỉ thay dữ liệu động Tuần 4';b.onclick=exportWeek4ToGoogleSheet;bar.insertBefore(b,close||null);
 }
 const openOutputPreviewBeforeWeek4Write=openOutputPreview;
 openOutputPreview=function(){openOutputPreviewBeforeWeek4Write();ensureGoogleSheetsWeek4WriteButton();};
