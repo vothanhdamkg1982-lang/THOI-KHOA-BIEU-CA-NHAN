@@ -1097,7 +1097,7 @@ const previewBtnGoogleReadOnly=document.getElementById('previewBtn');
 if(previewBtnGoogleReadOnly)previewBtnGoogleReadOnly.onclick=openOutputPreview;
 
 
-// BƯỚC 5.1.3M - Tuần 4: ghi từ TKB nguồn thật, không dùng điều chỉnh xuất tạm; kiểm tra trùng tiết, cơ cấu môn và tên bài.
+// BƯỚC 5.1.3O - Tuần 4: ghi đúng chính dữ liệu đang hiển thị trong Xem trước sang Google Sheet.
 // Chỉ ghi khi: đúng Spreadsheet, đúng tab/GID, đang chọn Tuần 4, Google Sheet chưa có Tuần 4.
 const GOOGLE_SHEETS_TEACHER_GID=1908030276;
 function gsA1Title(title){return `'${String(title).replace(/'/g,"''")}'`;}
@@ -1174,12 +1174,11 @@ function gsWeek4Rows(data){
 async function exportWeek4ToGoogleSheet(){
   const btn=document.querySelector('#outputPreviewModal .preview-google-write-week4'), old=btn?.textContent;
   try{
-    if(Number($('weekSelect')?.value)!==4)throw new Error('BƯỚC 5.1.3N chỉ cho phép ghi Tuần 4. Hãy chọn Tuần 4 trước.');
-    // 5.1.3K: Google Sheet là bản ghi thật nên lấy trực tiếp TKB nguồn + Phụ lục 2,
-    // KHÔNG dùng lớp điều chỉnh tạm của Xem trước (localStorage), tránh một chỉnh sửa cũ làm
-    // đổi môn/lớp hoặc tạo trùng tiết khi ghi sang Google Sheet.
-    applyLessonPlan();
-    const data=filterSchedule().map(x=>({...x}));
+    if(Number($('weekSelect')?.value)!==4)throw new Error('BƯỚC 5.1.3O chỉ cho phép ghi Tuần 4. Hãy chọn Tuần 4 trước.');
+    // BƯỚC 5.1.3O: dùng CHÍNH dữ liệu đã ghép đang tạo bản Xem trước.
+    // Nhờ đó Môn + Lớp + Tên bài + Tiết bài ghi sang Google Sheet phải trùng với bản giáo viên vừa kiểm tra.
+    // outputScheduleData() tự applyLessonPlan() và áp dụng lớp điều chỉnh xuất (nếu giáo viên đã sửa trong Xem trước).
+    const data=outputScheduleData().map(x=>({...x}));
 
     // BƯỚC 5.1.3N: tuyệt đối dùng môn đã đọc từ TKB nguồn, không hard-code đổi môn.
     // File TKB chuẩn mới phải cho: Thứ Tư - Chiều - Tiết 2 - lớp 3B2 = Tin học.
@@ -1268,7 +1267,7 @@ async function exportWeek4ToGoogleSheet(){
 }
 function ensureGoogleSheetsWeek4WriteButton(){
   const bar=document.querySelector('#outputPreviewModal .output-preview-bar>div'); if(!bar||bar.querySelector('.preview-google-write-week4'))return;
-  const close=bar.querySelector('.preview-close'); const b=document.createElement('button'); b.type='button';b.className='preview-google-write-week4';b.textContent='Ghi Tuần 4 vào Google Sheet';b.title='BƯỚC 5.1.3N – đọc đúng môn 3B2 trực tiếp từ TKB nguồn đã sửa; không hard-code';b.onclick=exportWeek4ToGoogleSheet;bar.insertBefore(b,close||null);
+  const close=bar.querySelector('.preview-close'); const b=document.createElement('button'); b.type='button';b.className='preview-google-write-week4';b.textContent='Ghi Tuần 4 vào Google Sheet';b.title='BƯỚC 5.1.3O – ghi chính dữ liệu Xem trước đã kiểm tra sang Google Sheet, gồm đầy đủ tên bài';b.onclick=exportWeek4ToGoogleSheet;bar.insertBefore(b,close||null);
 }
 const openOutputPreviewBeforeWeek4Write=openOutputPreview;
 openOutputPreview=function(){openOutputPreviewBeforeWeek4Write();ensureGoogleSheetsWeek4WriteButton();};
