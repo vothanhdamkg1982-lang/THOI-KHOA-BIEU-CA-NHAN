@@ -1120,12 +1120,13 @@ function gsWeek4Rows(data){
   values.push({range:'A75',values:[[`Năm học 2026 – 2027. ${formalSubjectGradeText(data)}, Trường TH – THCS & THPT Lại Sơn`]]});
   values.push({range:'A76',values:[[`Tuần 4: từ ngày ${wd.fmt(wd.start)} đến ${wd.fmt(wd.end)}`]]});
   // Giữ nguyên toàn bộ nhãn/merge/định dạng từ mẫu Tuần 3; chỉ thay các ô dữ liệu biến đổi.
-  values.push({range:'C78:G78',values:[[...wd.days.map((d,i)=>`Ngày ${d}\n${labels[i]}`)]]});
+  values.push({range:'C77:G77',values:[[...wd.days.map(d=>`Ngày ${d}`)]]});
+  values.push({range:'C78:G78',values:[[...labels]]});
   const schedule=[];
   for(let t=1;t<=4;t++)schedule.push(days.map(day=>cell(day,'Sáng',t)));
   for(let t=1;t<=3;t++)schedule.push(days.map(day=>cell(day,'Chiều',t)));
-  values.push({range:'C80:G86',values:schedule});
-  values.push({range:'A87',values:[[`Tổng số: ${data.length} tiết`]]});
+  values.push({range:'C79:G85',values:schedule});
+  values.push({range:'A86',values:[[`Tổng số: ${data.length} tiết`]]});
   // Bảng tổng hợp: chỉ ghi vào ô đầu của từng vùng merge có sẵn trong mẫu.
   details.slice(0,4).forEach((x,i)=>{
     values.push({range:`A${91+i}`,values:[[i+1]]});
