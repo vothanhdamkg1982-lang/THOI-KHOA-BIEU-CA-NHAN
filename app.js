@@ -1016,12 +1016,14 @@ function printSchedule(){
 }
 $('loginBtn')&&($('loginBtn').onclick=openAuthModal); $('logoutBtn')&&($('logoutBtn').onclick=logoutTeacher); initWeekSelect(); initSupabaseConnection(); loadScheduleRepository(); loadSchoolCalendar(); activateSelectedWeek(); $('fileInput').addEventListener('change',e=>e.target.files.length&&readWorkbooks(e.target.files)); $('pl2Input').addEventListener('change',e=>e.target.files[0]&&readLessonPlan(e.target.files[0])); $('weekSelect').addEventListener('change',()=>{saveOutputSettings();activateSelectedWeek()}); $('calendarBtn')&&($('calendarBtn').onclick=openCalendarManager); $('repoBtn')&&($('repoBtn').onclick=openRepoManager); $('appendix2RepoBtn')&&($('appendix2RepoBtn').onclick=openAppendix2RepoManager); $('concurrentPeriods').addEventListener('change',()=>{if(Number($('concurrentPeriods').value)<0)$('concurrentPeriods').value=0;saveOutputSettings()}); ['fThu','fBuoi','fPoint','fClass'].forEach(id=>$(id).addEventListener('change',render)); $('tableBtn').onclick=()=>{currentView='table';render()}; $('weekBtn').onclick=()=>{currentView='week';render()}; $('excelBtn').onclick=exportExcel; $('pdfBtn').onclick=exportPDF; $('printBtn').onclick=printSchedule; ensurePreviewButton();
 
-// BƯỚC 5.1.1O-R1 - Google Sheets: xác minh đúng mã mới đang chạy; vẫn CHỈ ĐỌC.
+// BƯỚC 5.1.2B - Google Sheets: thử quyền GHI an toàn trên đúng tab Võ Thanh Đậm.
 const GOOGLE_SHEETS_CLIENT_ID='671858456606-0st6517jnk78bovre7mp3er2u6v3guhs.apps.googleusercontent.com';
 const GOOGLE_SHEETS_SPREADSHEET_ID='1EFMtbEFnPKbVH5TFsJdV9FUCSricWkiCBdbOQn0FwDo';
 const GOOGLE_SHEETS_LINK_GID=162218494;
 const GOOGLE_SHEETS_TEACHER_NAME='Võ Thanh Đậm';
-const GOOGLE_SHEETS_READONLY_SCOPE='https://www.googleapis.com/auth/spreadsheets.readonly';
+const GOOGLE_SHEETS_TEACHER_GID=1908030276;
+const GOOGLE_SHEETS_WRITE_SCOPE='https://www.googleapis.com/auth/spreadsheets';
+const GOOGLE_SHEETS_SAFE_TEST_CELL='Z1000';
 let googleSheetsTokenClient=null;
 function loadGoogleIdentityServices(){
   if(window.google?.accounts?.oauth2)return Promise.resolve();
@@ -1031,27 +1033,21 @@ function loadGoogleIdentityServices(){
     const s=document.createElement('script');s.id='googleIdentityServicesScript';s.src='https://accounts.google.com/gsi/client';s.async=true;s.defer=true;s.onload=resolve;s.onerror=()=>reject(new Error('Không tải được Google Identity Services.'));document.head.appendChild(s);
   });
 }
-async function getGoogleSheetsReadOnlyToken(){
+async function getGoogleSheetsWriteToken(){
   await loadGoogleIdentityServices();
   return new Promise((resolve,reject)=>{
-    googleSheetsTokenClient=google.accounts.oauth2.initTokenClient({client_id:GOOGLE_SHEETS_CLIENT_ID,scope:GOOGLE_SHEETS_READONLY_SCOPE,callback:r=>{if(r?.error)return reject(new Error(r.error_description||r.error));if(!r?.access_token)return reject(new Error('Google không trả về access token.'));resolve(r.access_token);}});
+    googleSheetsTokenClient=google.accounts.oauth2.initTokenClient({client_id:GOOGLE_SHEETS_CLIENT_ID,scope:GOOGLE_SHEETS_WRITE_SCOPE,callback:r=>{if(r?.error)return reject(new Error(r.error_description||r.error));if(!r?.access_token)return reject(new Error('Google không trả về access token.'));resolve(r.access_token);}});
     googleSheetsTokenClient.requestAccessToken({prompt:'consent'});
   });
 }
 function googleSheetNameKey(v){return String(v||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/đ/gi,'d').toLowerCase().replace(/[^a-z0-9]+/g,' ').trim();}
-function googleSheetWeekFromLine(line){
-  const text=String(line||'').replace(/\s+/g,' ').trim();
-  const m=text.match(/Hoạt\s*động\s*giáo\s*dục\s*tuần\s*((?:\d\s*){1,2})/i);
-  if(!m)return null;
-  const week=Number(m[1].replace(/\s/g,''));
-  return Number.isInteger(week)&&week>=1&&week<=35?week:null;
-}
-async function checkGoogleSheetReadOnly(){
-  const btn=document.querySelector('#outputPreviewModal .preview-google-readonly');
+async function testGoogleSheetSafeWrite(){
+  const btn=document.querySelector('#outputPreviewModal .preview-google-write-test');
   const oldText=btn?.textContent;
+  let token='', testRange='', marker='', wroteMarker=false;
   try{
-    if(btn){btn.disabled=true;btn.textContent='Đang kiểm tra...';}
-    const token=await getGoogleSheetsReadOnlyToken();
+    if(btn){btn.disabled=true;btn.textContent='Đang thử ghi...';}
+    token=await getGoogleSheetsWriteToken();
     const headers={Authorization:`Bearer ${token}`};
     const metaUrl=`https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(GOOGLE_SHEETS_SPREADSHEET_ID)}?fields=properties.title,sheets.properties(sheetId,title,index)`;
     const metaRes=await fetch(metaUrl,{headers});
@@ -1059,39 +1055,54 @@ async function checkGoogleSheetReadOnly(){
     if(!metaRes.ok)throw new Error(meta?.error?.message||'Không đọc được thông tin Google Sheet.');
     const sheets=meta.sheets||[];
     const teacherKey=googleSheetNameKey(GOOGLE_SHEETS_TEACHER_NAME);
-    const teacherSheet=sheets.find(s=>googleSheetNameKey(s?.properties?.title)===teacherKey)||sheets.find(s=>googleSheetNameKey(s?.properties?.title).includes(teacherKey));
-    const linkSheet=sheets.find(s=>Number(s?.properties?.sheetId)===GOOGLE_SHEETS_LINK_GID);
-    if(!teacherSheet){
-      const names=sheets.map(s=>s?.properties?.title).filter(Boolean).join(', ');
-      throw new Error(`Chưa tìm thấy tab mang tên "${GOOGLE_SHEETS_TEACHER_NAME}".\n\nTab gid=${GOOGLE_SHEETS_LINK_GID} hiện là: ${linkSheet?.properties?.title||'không tìm thấy'}.\n\nCác tab đọc được: ${names}`);
-    }
+    const teacherSheet=sheets.find(s=>googleSheetNameKey(s?.properties?.title)===teacherKey);
+    if(!teacherSheet)throw new Error(`Không tìm thấy đúng tab "${GOOGLE_SHEETS_TEACHER_NAME}". Đã dừng trước khi ghi.`);
     const title=teacherSheet.properties.title;
-    const targetGid=teacherSheet.properties.sheetId;
-    const range=`'${String(title).replace(/'/g,"''")}'!A:K`;
-    const valuesUrl=`https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(GOOGLE_SHEETS_SPREADSHEET_ID)}/values/${encodeURIComponent(range)}?majorDimension=ROWS`;
-    const valuesRes=await fetch(valuesUrl,{headers});
-    const valuesJson=await valuesRes.json();
-    if(!valuesRes.ok)throw new Error(valuesJson?.error?.message||'Không đọc được dữ liệu của sheet giáo viên.');
-    const rows=valuesJson.values||[];
-    const weeks=[];
-    rows.forEach((row,i)=>{const week=googleSheetWeekFromLine((row||[]).join(' '));if(week!==null)weeks.push({week,row:i+1});});
-    const uniqueWeeks=[];const seen=new Set();
-    weeks.forEach(x=>{if(!seen.has(x.week)){seen.add(x.week);uniqueWeeks.push(x);}});
-    uniqueWeeks.sort((a,b)=>a.week-b.week);
-    const weekText=uniqueWeeks.length?uniqueWeeks.map(x=>`Tuần ${x.week} (dòng ${x.row})`).join(', '):'chưa nhận diện được tiêu đề tuần 1–35 trong cột A:K';
-    const missing=Array.from({length:35},(_,i)=>i+1).filter(w=>!seen.has(w));
-    alert(`KẾT NỐI GOOGLE SHEETS CHỈ ĐỌC THÀNH CÔNG – O-R1\n\nTệp: ${meta.properties?.title||GOOGLE_SHEETS_SPREADSHEET_ID}\nTab giáo viên: ${title}\nGID thực tế: ${targetGid}\nTab của link gid=${GOOGLE_SHEETS_LINK_GID}: ${linkSheet?.properties?.title||'không tìm thấy'}\nSố dòng đã đọc: ${rows.length}\n\nNhận diện tuần: ${weekText}\n\nTuần chưa thấy: ${missing.length?missing.join(', '):'Không có – đã thấy đủ Tuần 1–35'}\n\nBước này vẫn chỉ đọc; app chưa có quyền và chưa có lệnh ghi/sửa/xóa Google Sheet.`);
-  }catch(err){console.error('Google Sheets read-only check:',err);alert(`Chưa xác định được đúng Google Sheet của giáo viên.\n\n${err?.message||err}`);}
-  finally{if(btn){btn.disabled=false;btn.textContent=oldText||'Kiểm tra Google Sheet O-R1';}}
+    const targetGid=Number(teacherSheet.properties.sheetId);
+    if(targetGid!==GOOGLE_SHEETS_TEACHER_GID)throw new Error(`GID tab "${title}" là ${targetGid}, không khớp GID khóa an toàn ${GOOGLE_SHEETS_TEACHER_GID}. Đã dừng trước khi ghi.`);
+    testRange=`'${String(title).replace(/'/g,"''")}'!${GOOGLE_SHEETS_SAFE_TEST_CELL}`;
+    const rangeEncoded=encodeURIComponent(testRange);
+    const valueUrl=`https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(GOOGLE_SHEETS_SPREADSHEET_ID)}/values/${rangeEncoded}`;
+    const beforeRes=await fetch(valueUrl,{headers});
+    const before=await beforeRes.json();
+    if(!beforeRes.ok)throw new Error(before?.error?.message||'Không kiểm tra được ô thử nghiệm.');
+    const beforeValue=before?.values?.[0]?.[0];
+    if(beforeValue!==undefined&&String(beforeValue)!=='')throw new Error(`Ô an toàn ${GOOGLE_SHEETS_SAFE_TEST_CELL} đang có dữ liệu. Đã dừng, không ghi đè.`);
+    marker=`TKB-GV-DAM-TEST-${Date.now()}`;
+    const writeRes=await fetch(`${valueUrl}?valueInputOption=RAW`,{method:'PUT',headers:{...headers,'Content-Type':'application/json'},body:JSON.stringify({range:testRange,majorDimension:'ROWS',values:[[marker]]})});
+    const writeJson=await writeRes.json();
+    if(!writeRes.ok)throw new Error(writeJson?.error?.message||'Google từ chối phép ghi thử.');
+    wroteMarker=true;
+    const verifyRes=await fetch(valueUrl,{headers});
+    const verify=await verifyRes.json();
+    if(!verifyRes.ok)throw new Error(verify?.error?.message||'Không đọc lại được ô vừa ghi.');
+    const verifyValue=verify?.values?.[0]?.[0];
+    if(verifyValue!==marker)throw new Error('Giá trị đọc lại không khớp giá trị vừa ghi.');
+    const clearRes=await fetch(`${valueUrl}:clear`,{method:'POST',headers:{...headers,'Content-Type':'application/json'},body:'{}'});
+    const clearJson=await clearRes.json();
+    if(!clearRes.ok)throw new Error(clearJson?.error?.message||'Đã ghi thử nhưng chưa xóa được giá trị thử nghiệm.');
+    wroteMarker=false;
+    const finalRes=await fetch(valueUrl,{headers});
+    const finalJson=await finalRes.json();
+    if(!finalRes.ok)throw new Error(finalJson?.error?.message||'Không xác minh được trạng thái sau khi xóa.');
+    const finalValue=finalJson?.values?.[0]?.[0];
+    if(finalValue!==undefined&&String(finalValue)!=='')throw new Error('Ô thử nghiệm chưa trở về trạng thái trống sau khi xóa.');
+    alert(`THỬ QUYỀN GHI GOOGLE SHEETS THÀNH CÔNG – 5.1.2B\n\nTệp: ${meta.properties?.title||GOOGLE_SHEETS_SPREADSHEET_ID}\nTab khóa an toàn: ${title}\nGID: ${targetGid}\nÔ thử nghiệm: ${GOOGLE_SHEETS_SAFE_TEST_CELL}\n\nĐã thực hiện: kiểm tra ô trống → ghi giá trị thử → đọc lại đúng → xóa giá trị thử → xác minh ô trống.\n\nCHƯA có lệnh xuất kế hoạch tuần thật.`);
+  }catch(err){
+    if(wroteMarker&&token&&testRange){
+      try{const headers={Authorization:`Bearer ${token}`,'Content-Type':'application/json'};const valueUrl=`https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(GOOGLE_SHEETS_SPREADSHEET_ID)}/values/${encodeURIComponent(testRange)}`;await fetch(`${valueUrl}:clear`,{method:'POST',headers,body:'{}'});}catch(_cleanupErr){}
+    }
+    console.error('Google Sheets safe write test:',err);alert(`THỬ QUYỀN GHI CHƯA THÀNH CÔNG\n\n${err?.message||err}\n\nKhông có lệnh xuất kế hoạch tuần thật.`);
+  }finally{if(btn){btn.disabled=false;btn.textContent=oldText||'Thử quyền ghi Google Sheet';}}
 }
-function ensureGoogleSheetsReadOnlyPreviewButton(){
+function ensureGoogleSheetsWriteTestPreviewButton(){
   const bar=document.querySelector('#outputPreviewModal .output-preview-bar>div');
-  if(!bar||bar.querySelector('.preview-google-readonly'))return;
+  if(!bar||bar.querySelector('.preview-google-write-test'))return;
   const close=bar.querySelector('.preview-close');
-  const b=document.createElement('button');b.type='button';b.className='preview-google-readonly';b.textContent='Kiểm tra Google Sheet O-R1';b.title='BƯỚC 5.1.1O-R1 – chỉ đọc; tự tìm tab Võ Thanh Đậm và tuần 1–35';b.onclick=checkGoogleSheetReadOnly;
+  const b=document.createElement('button');b.type='button';b.className='preview-google-write-test';b.textContent='Thử quyền ghi Google Sheet';b.title='BƯỚC 5.1.2B – chỉ thử ghi/đọc/xóa tại ô trống Z1000 của đúng tab Võ Thanh Đậm; chưa xuất kế hoạch thật';b.onclick=testGoogleSheetSafeWrite;
   bar.insertBefore(b,close||null);
 }
-const openOutputPreviewBeforeGoogleReadOnly=openOutputPreview;
-openOutputPreview=function(){openOutputPreviewBeforeGoogleReadOnly();ensureGoogleSheetsReadOnlyPreviewButton();};
-const previewBtnGoogleReadOnly=document.getElementById('previewBtn');
-if(previewBtnGoogleReadOnly)previewBtnGoogleReadOnly.onclick=openOutputPreview;
+const openOutputPreviewBeforeGoogleWriteTest=openOutputPreview;
+openOutputPreview=function(){openOutputPreviewBeforeGoogleWriteTest();ensureGoogleSheetsWriteTestPreviewButton();};
+const previewBtnGoogleWriteTest=document.getElementById('previewBtn');
+if(previewBtnGoogleWriteTest)previewBtnGoogleWriteTest.onclick=openOutputPreview;
