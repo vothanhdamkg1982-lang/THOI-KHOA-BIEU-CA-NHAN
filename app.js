@@ -1546,7 +1546,22 @@ async function exportSelectedWeek1To35ToGoogleSheet(){
     const action=exists?'CẬP NHẬT':'GHI';
     if(!confirm(`${action} TUẦN ${week} vào tab Võ Thanh Đậm?\n\nVùng dòng ${startRow}–${endRow}. Mẫu định dạng lấy từ tab mẫu ẩn, không phụ thuộc các tuần đang tồn tại.\nTKB tuần này hiện có ${data.length} tiết; tổng kể cả kiêm nhiệm: ${data.length+getConcurrentPeriods()}.`))return;
     if(btn)btn.textContent=`Đang ${action.toLowerCase()} Tuần ${week}...`;
-    const requests=[{unmergeCells:{range:{sheetId:GOOGLE_SHEETS_TEACHER_GID,startRowIndex:d0,endRowIndex:d1,startColumnIndex:0,endColumnIndex:8}}},{copyPaste:{source:{sheetId:templateSheetId,startRowIndex:s0,endRowIndex:s1,startColumnIndex:0,endColumnIndex:8},destination:{sheetId:GOOGLE_SHEETS_TEACHER_GID,startRowIndex:d0,endRowIndex:d1,startColumnIndex:0,endColumnIndex:8},pasteType:'PASTE_NORMAL',pasteOrientation:'NORMAL'}}];
+    // BƯỚC 5.3.3A: Google Sheets chỉ cho unmerge khi range trùng CHÍNH XÁC toàn bộ ô đã merge.
+    // Không unmerge cả khối A:H nữa; đọc các merge thực tế trong vùng tuần và tách đúng từng merge.
+    // Cách này giữ nguyên cơ chế 5.2.14B, đồng thời tránh lỗi requests[0].unmergeCells khi một merge
+    // có biên không trùng hoàn toàn với khối tuần đang cập nhật.
+    const teacherMergeData=await gsJson(`${base}?ranges=${encodeURIComponent(q+`!A${startRow}:H${endRow}`)}&includeGridData=false&fields=sheets(merges)`,{headers});
+    const destinationMerges=(teacherMergeData.sheets?.[0]?.merges||[]).filter(m=>
+      Number(m.sheetId)===GOOGLE_SHEETS_TEACHER_GID &&
+      m.startRowIndex>=d0 && m.endRowIndex<=d1 &&
+      m.startColumnIndex>=0 && m.endColumnIndex<=8
+    );
+    const requests=destinationMerges.map(m=>({unmergeCells:{range:{
+      sheetId:GOOGLE_SHEETS_TEACHER_GID,
+      startRowIndex:m.startRowIndex,endRowIndex:m.endRowIndex,
+      startColumnIndex:m.startColumnIndex,endColumnIndex:m.endColumnIndex
+    }}}));
+    requests.push({copyPaste:{source:{sheetId:templateSheetId,startRowIndex:s0,endRowIndex:s1,startColumnIndex:0,endColumnIndex:8},destination:{sheetId:GOOGLE_SHEETS_TEACHER_GID,startRowIndex:d0,endRowIndex:d1,startColumnIndex:0,endColumnIndex:8},pasteType:'PASTE_NORMAL',pasteOrientation:'NORMAL'}});
     srcMerges.forEach(m=>requests.push({mergeCells:{range:{sheetId:GOOGLE_SHEETS_TEACHER_GID,startRowIndex:m.startRowIndex+offset,endRowIndex:m.endRowIndex+offset,startColumnIndex:m.startColumnIndex,endColumnIndex:m.endColumnIndex},mergeType:'MERGE_ALL'}}));
     srcRowMeta.forEach((rm,i)=>{if(rm?.pixelSize)requests.push({updateDimensionProperties:{range:{sheetId:GOOGLE_SHEETS_TEACHER_GID,dimension:'ROWS',startIndex:d0+i,endIndex:d0+i+1},properties:{pixelSize:rm.pixelSize},fields:'pixelSize'}});});
     const scheduleStartIndex=specialWeek1?9:d0+5;
