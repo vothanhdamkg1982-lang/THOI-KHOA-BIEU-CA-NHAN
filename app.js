@@ -1097,7 +1097,7 @@ const previewBtnGoogleReadOnly=document.getElementById('previewBtn');
 if(previewBtnGoogleReadOnly)previewBtnGoogleReadOnly.onclick=openOutputPreview;
 
 
-// BƯỚC 5.1.3P - Tuần 4: làm sạch tiêu đề/tổng số khi ghi Google Sheet; giữ nguyên dữ liệu đã Đạt ở 5.1.3O.
+// BƯỚC 5.1.3Q - Tuần 4: giữ nguyên nội dung 5.1.3P đã Đạt; bật xuống dòng tự động cho ô bài dạy trên Google Sheet.
 // Chỉ ghi khi: đúng Spreadsheet, đúng tab/GID, đang chọn Tuần 4, Google Sheet chưa có Tuần 4.
 const GOOGLE_SHEETS_TEACHER_GID=1908030276;
 function gsA1Title(title){return `'${String(title).replace(/'/g,"''")}'`;}
@@ -1250,8 +1250,11 @@ async function exportWeek4ToGoogleSheet(){
     ];
     srcMerges.forEach(m=>requests.push({mergeCells:{range:{sheetId:GOOGLE_SHEETS_TEACHER_GID,startRowIndex:m.startRowIndex+23,endRowIndex:m.endRowIndex+23,startColumnIndex:m.startColumnIndex,endColumnIndex:m.endColumnIndex},mergeType:'MERGE_ALL'}}));
     srcRowMeta.forEach((rm,i)=>{if(rm?.pixelSize)requests.push({updateDimensionProperties:{range:{sheetId:GOOGLE_SHEETS_TEACHER_GID,dimension:'ROWS',startIndex:73+i,endIndex:74+i},properties:{pixelSize:rm.pixelSize},fields:'pixelSize'}});});
-    // Tên bài dài hơn nhãn TKB ngắn: bảo đảm 7 dòng tiết 79–85 đủ cao để hiển thị nội dung đã wrap.
-    requests.push({updateDimensionProperties:{range:{sheetId:GOOGLE_SHEETS_TEACHER_GID,dimension:'ROWS',startIndex:78,endIndex:85},properties:{pixelSize:62},fields:'pixelSize'}});
+    // 5.1.3Q: tên bài dài phải tự xuống hàng trong đúng vùng tiết C79:G85.
+    // Chỉ đổi wrapStrategy, không đụng font/viền/màu/căn lề đã sao chép từ mẫu Tuần 3.
+    requests.push({repeatCell:{range:{sheetId:GOOGLE_SHEETS_TEACHER_GID,startRowIndex:78,endRowIndex:85,startColumnIndex:2,endColumnIndex:7},cell:{userEnteredFormat:{wrapStrategy:'WRAP'}},fields:'userEnteredFormat.wrapStrategy'}});
+    // Cho 7 hàng tiết tự tăng chiều cao theo số dòng sau khi wrap, thay vì ép cố định 62 px.
+    requests.push({autoResizeDimensions:{dimensions:{sheetId:GOOGLE_SHEETS_TEACHER_GID,dimension:'ROWS',startIndex:78,endIndex:85}}});
     await gsJson(`${base}:batchUpdate`,{method:'POST',headers,body:JSON.stringify({requests})});
     // 5.1.3G: xóa CHỈ GIÁ TRỊ vùng dữ liệu Tổng hợp, giữ nguyên merge/viền/font/căn chỉnh vừa sao chép.
     // Xóa cả cột A để loại sạch các số/chữ rơi ngoài bảng do dữ liệu cũ của template.
@@ -1272,7 +1275,7 @@ async function exportWeek4ToGoogleSheet(){
 }
 function ensureGoogleSheetsWeek4WriteButton(){
   const bar=document.querySelector('#outputPreviewModal .output-preview-bar>div'); if(!bar||bar.querySelector('.preview-google-write-week4'))return;
-  const close=bar.querySelector('.preview-close'); const b=document.createElement('button'); b.type='button';b.className='preview-google-write-week4';b.textContent='Ghi Tuần 4 vào Google Sheet';b.title='BƯỚC 5.1.3P – ghi Tuần 4 sạch mép trái, tiêu đề có Tin học, Công nghệ, Đạo đức; giữ nguyên dữ liệu đã kiểm tra';b.onclick=exportWeek4ToGoogleSheet;bar.insertBefore(b,close||null);
+  const close=bar.querySelector('.preview-close'); const b=document.createElement('button'); b.type='button';b.className='preview-google-write-week4';b.textContent='Ghi Tuần 4 vào Google Sheet';b.title='BƯỚC 5.1.3Q – ghi Tuần 4 và tự xuống hàng tên bài trên Google Sheet; giữ nguyên dữ liệu đã kiểm tra';b.onclick=exportWeek4ToGoogleSheet;bar.insertBefore(b,close||null);
 }
 const openOutputPreviewBeforeWeek4Write=openOutputPreview;
 openOutputPreview=function(){openOutputPreviewBeforeWeek4Write();ensureGoogleSheetsWeek4WriteButton();};
