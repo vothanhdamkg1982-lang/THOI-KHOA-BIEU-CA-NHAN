@@ -1016,7 +1016,7 @@ function printSchedule(){
 }
 $('loginBtn')&&($('loginBtn').onclick=openAuthModal); $('logoutBtn')&&($('logoutBtn').onclick=logoutTeacher); initWeekSelect(); initSupabaseConnection(); loadScheduleRepository(); loadSchoolCalendar(); activateSelectedWeek(); $('fileInput').addEventListener('change',e=>e.target.files.length&&readWorkbooks(e.target.files)); $('pl2Input').addEventListener('change',e=>e.target.files[0]&&readLessonPlan(e.target.files[0])); $('weekSelect').addEventListener('change',()=>{saveOutputSettings();activateSelectedWeek()}); $('calendarBtn')&&($('calendarBtn').onclick=openCalendarManager); $('repoBtn')&&($('repoBtn').onclick=openRepoManager); $('appendix2RepoBtn')&&($('appendix2RepoBtn').onclick=openAppendix2RepoManager); $('concurrentPeriods').addEventListener('change',()=>{if(Number($('concurrentPeriods').value)<0)$('concurrentPeriods').value=0;saveOutputSettings()}); ['fThu','fBuoi','fPoint','fClass'].forEach(id=>$(id).addEventListener('change',render)); $('tableBtn').onclick=()=>{currentView='table';render()}; $('weekBtn').onclick=()=>{currentView='week';render()}; $('excelBtn').onclick=exportExcel; $('pdfBtn').onclick=exportPDF; $('printBtn').onclick=printSchedule; ensurePreviewButton();
 
-// BƯỚC 5.1.1O - Google Sheets: nhận diện đúng tab GV Đậm + tuần 01–35, vẫn CHỈ ĐỌC.
+// BƯỚC 5.1.1O-R1 - Google Sheets: xác minh đúng mã mới đang chạy; vẫn CHỈ ĐỌC.
 const GOOGLE_SHEETS_CLIENT_ID='671858456606-0st6517jnk78bovre7mp3er2u6v3guhs.apps.googleusercontent.com';
 const GOOGLE_SHEETS_SPREADSHEET_ID='1EFMtbEFnPKbVH5TFsJdV9FUCSricWkiCBdbOQn0FwDo';
 const GOOGLE_SHEETS_LINK_GID=162218494;
@@ -1080,15 +1080,15 @@ async function checkGoogleSheetReadOnly(){
     uniqueWeeks.sort((a,b)=>a.week-b.week);
     const weekText=uniqueWeeks.length?uniqueWeeks.map(x=>`Tuần ${x.week} (dòng ${x.row})`).join(', '):'chưa nhận diện được tiêu đề tuần 1–35 trong cột A:K';
     const missing=Array.from({length:35},(_,i)=>i+1).filter(w=>!seen.has(w));
-    alert(`KẾT NỐI GOOGLE SHEETS CHỈ ĐỌC THÀNH CÔNG\n\nTệp: ${meta.properties?.title||GOOGLE_SHEETS_SPREADSHEET_ID}\nTab giáo viên: ${title}\nGID thực tế: ${targetGid}\nTab của link gid=${GOOGLE_SHEETS_LINK_GID}: ${linkSheet?.properties?.title||'không tìm thấy'}\nSố dòng đã đọc: ${rows.length}\n\nNhận diện tuần: ${weekText}\n\nTuần chưa thấy: ${missing.length?missing.join(', '):'Không có – đã thấy đủ Tuần 1–35'}\n\nBước này vẫn chỉ đọc; app chưa có quyền và chưa có lệnh ghi/sửa/xóa Google Sheet.`);
+    alert(`KẾT NỐI GOOGLE SHEETS CHỈ ĐỌC THÀNH CÔNG – O-R1\n\nTệp: ${meta.properties?.title||GOOGLE_SHEETS_SPREADSHEET_ID}\nTab giáo viên: ${title}\nGID thực tế: ${targetGid}\nTab của link gid=${GOOGLE_SHEETS_LINK_GID}: ${linkSheet?.properties?.title||'không tìm thấy'}\nSố dòng đã đọc: ${rows.length}\n\nNhận diện tuần: ${weekText}\n\nTuần chưa thấy: ${missing.length?missing.join(', '):'Không có – đã thấy đủ Tuần 1–35'}\n\nBước này vẫn chỉ đọc; app chưa có quyền và chưa có lệnh ghi/sửa/xóa Google Sheet.`);
   }catch(err){console.error('Google Sheets read-only check:',err);alert(`Chưa xác định được đúng Google Sheet của giáo viên.\n\n${err?.message||err}`);}
-  finally{if(btn){btn.disabled=false;btn.textContent=oldText||'Kiểm tra Google Sheet';}}
+  finally{if(btn){btn.disabled=false;btn.textContent=oldText||'Kiểm tra Google Sheet O-R1';}}
 }
 function ensureGoogleSheetsReadOnlyPreviewButton(){
   const bar=document.querySelector('#outputPreviewModal .output-preview-bar>div');
   if(!bar||bar.querySelector('.preview-google-readonly'))return;
   const close=bar.querySelector('.preview-close');
-  const b=document.createElement('button');b.type='button';b.className='preview-google-readonly';b.textContent='Kiểm tra Google Sheet';b.title='Đăng nhập Google và kiểm tra chỉ đọc sheet được nhà trường cấp';b.onclick=checkGoogleSheetReadOnly;
+  const b=document.createElement('button');b.type='button';b.className='preview-google-readonly';b.textContent='Kiểm tra Google Sheet O-R1';b.title='BƯỚC 5.1.1O-R1 – chỉ đọc; tự tìm tab Võ Thanh Đậm và tuần 1–35';b.onclick=checkGoogleSheetReadOnly;
   bar.insertBefore(b,close||null);
 }
 const openOutputPreviewBeforeGoogleReadOnly=openOutputPreview;
