@@ -1537,6 +1537,24 @@ async function exportSelectedWeek1To35ToGoogleSheet(){
       sumReq.push({repeatCell:{range:{sheetId:GOOGLE_SHEETS_TEACHER_GID,startRowIndex:17,endRowIndex:20,startColumnIndex:1,endColumnIndex:8},cell:{userEnteredFormat:{textFormat:{bold:true,fontFamily:'Times New Roman',fontSize:12}}},fields:'userEnteredFormat.textFormat'}});
       sumReq.push({repeatCell:{range:{sheetId:GOOGLE_SHEETS_TEACHER_GID,startRowIndex:24,endRowIndex:25,startColumnIndex:1,endColumnIndex:8},cell:{userEnteredFormat:{textFormat:{bold:true,fontFamily:'Times New Roman',fontSize:12}}},fields:'userEnteredFormat.textFormat'}});
       await gsJson(`${base}:batchUpdate`,{method:'POST',headers,body:JSON.stringify({requests:sumReq})});
+    } else {
+      // BƯỚC 5.2.10: chuẩn hóa phần cuối cho Tuần 2–35 theo đúng mẫu Tổng hợp đã Đạt của Tuần 1.
+      // Mỗi khối tuần 22 dòng: r12 = Tổng số tiết dạy, r13 = TỔNG HỢP, r14 = tiêu đề, r15–r18 = chi tiết, r19 = Tổng số.
+      const sr=startRow;
+      const sumReq=[
+        {unmergeCells:{range:{sheetId:GOOGLE_SHEETS_TEACHER_GID,startRowIndex:sr+11,endRowIndex:sr+20,startColumnIndex:1,endColumnIndex:8}}},
+        {mergeCells:{range:{sheetId:GOOGLE_SHEETS_TEACHER_GID,startRowIndex:sr+11,endRowIndex:sr+12,startColumnIndex:1,endColumnIndex:8},mergeType:'MERGE_ALL'}},
+        {mergeCells:{range:{sheetId:GOOGLE_SHEETS_TEACHER_GID,startRowIndex:sr+12,endRowIndex:sr+13,startColumnIndex:1,endColumnIndex:8},mergeType:'MERGE_ALL'}}
+      ];
+      for(let rr=sr+13;rr<sr+20;rr++){
+        sumReq.push({mergeCells:{range:{sheetId:GOOGLE_SHEETS_TEACHER_GID,startRowIndex:rr,endRowIndex:rr+1,startColumnIndex:2,endColumnIndex:4},mergeType:'MERGE_ALL'}});
+        sumReq.push({mergeCells:{range:{sheetId:GOOGLE_SHEETS_TEACHER_GID,startRowIndex:rr,endRowIndex:rr+1,startColumnIndex:5,endColumnIndex:8},mergeType:'MERGE_ALL'}});
+      }
+      sumReq.push({repeatCell:{range:{sheetId:GOOGLE_SHEETS_TEACHER_GID,startRowIndex:sr+11,endRowIndex:sr+20,startColumnIndex:1,endColumnIndex:8},cell:{userEnteredFormat:{horizontalAlignment:'CENTER',verticalAlignment:'MIDDLE',wrapStrategy:'WRAP',textFormat:{fontFamily:'Times New Roman',fontSize:12}}},fields:'userEnteredFormat(horizontalAlignment,verticalAlignment,wrapStrategy,textFormat)'}});
+      sumReq.push({repeatCell:{range:{sheetId:GOOGLE_SHEETS_TEACHER_GID,startRowIndex:sr+13,endRowIndex:sr+20,startColumnIndex:1,endColumnIndex:8},cell:{userEnteredFormat:{borders:{top:{style:'SOLID'},bottom:{style:'SOLID'},left:{style:'SOLID'},right:{style:'SOLID'}}}},fields:'userEnteredFormat.borders'}});
+      sumReq.push({repeatCell:{range:{sheetId:GOOGLE_SHEETS_TEACHER_GID,startRowIndex:sr+11,endRowIndex:sr+14,startColumnIndex:1,endColumnIndex:8},cell:{userEnteredFormat:{textFormat:{bold:true,fontFamily:'Times New Roman',fontSize:12}}},fields:'userEnteredFormat.textFormat'}});
+      sumReq.push({repeatCell:{range:{sheetId:GOOGLE_SHEETS_TEACHER_GID,startRowIndex:sr+19,endRowIndex:sr+20,startColumnIndex:1,endColumnIndex:8},cell:{userEnteredFormat:{textFormat:{bold:true,fontFamily:'Times New Roman',fontSize:12}}},fields:'userEnteredFormat.textFormat'}});
+      await gsJson(`${base}:batchUpdate`,{method:'POST',headers,body:JSON.stringify({requests:sumReq})});
     }
     // Tuần 1: giữ nguyên PHỤ LỤC 1.4 ở hàng 4 và ghi lại đúng 3 dòng tiêu đề hàng 5–7;
     // chỉ làm sạch bảng hàng 8–26. Tuần 2–35 giữ nguyên vùng 22 dòng.
@@ -1585,6 +1603,30 @@ async function exportSelectedWeek1To35ToGoogleSheet(){
           [4,'Đạo đức','',counts['Đạo đức'],'','','']
         ]},
         {range:'B25:H25',values:[['','Tổng số','',data.length+concurrent,'','','']]}
+      );
+    }
+    if(!specialWeek1){
+      const counts={'Công nghệ':0,'Tin học':0,'Đạo đức':0};
+      data.forEach(x=>{
+        const k=normKey(normalizeSubjectForPlan(x?.monHoc||x?.plan?.subject||'')).replace(/[^a-z0-9]+/g,'');
+        if(k.includes('congnghe')||k==='cn'||k==='cnghe')counts['Công nghệ']++;
+        else if(k.includes('tinhoc')||k==='th')counts['Tin học']++;
+        else if(k.includes('daoduc')||k==='dd')counts['Đạo đức']++;
+      });
+      const concurrent=getConcurrentPeriods(),r=n=>startRow+n;
+      // Loại các dòng tổng hợp cũ do gsWeekRows tạo, rồi ghi lại một cấu trúc thống nhất cho Tuần 2–35.
+      weekRows=weekRows.filter(x=>{const m=String(x.range).match(/^[A-Z]+(\d+)/);return !m||Number(m[1])<r(12);});
+      weekRows.push(
+        {range:`B${r(12)}`,values:[[`Tổng số: ${data.length} tiết`]]},
+        {range:`B${r(13)}`,values:[['TỔNG HỢP']]},
+        {range:`B${r(14)}:H${r(14)}`,values:[['TT','Nội dung','','Số lượng tiết học','Ghi chú','','']]},
+        {range:`B${r(15)}:H${r(18)}`,values:[
+          [1,'Tin học','',counts['Tin học'],'','',''],
+          [2,'Công nghệ','',counts['Công nghệ'],'','',''],
+          [3,'Kiêm nhiệm','',concurrent,'','',''],
+          [4,'Đạo đức','',counts['Đạo đức'],'','','']
+        ]},
+        {range:`B${r(19)}:H${r(19)}`,values:[['','Tổng số','',data.length+concurrent,'','','']]}
       );
     }
     const payload=weekRows.map(x=>({range:`${q}!${x.range}`,majorDimension:'ROWS',values:x.values}));await gsJson(`${base}/values:batchUpdate`,{method:'POST',headers,body:JSON.stringify({valueInputOption:'USER_ENTERED',data:payload})});
