@@ -43,6 +43,19 @@ async function updateTimetableEffectiveWeekSupabase(version){
   version.effectiveDate=week?.start||null;
   version.syncedToSupabase=true;
 }
+async function deleteTimetableVersionSupabase(version){
+  if(!currentAuthUser)throw new Error('Hãy đăng nhập giáo viên trước khi xóa TKB.');
+  if(!version?.supabaseId)throw new Error('Phiên bản TKB này chưa có mã Supabase. Hãy đăng nhập lại để tải Kho TKB từ Supabase.');
+  const {error:lessonError}=await supabaseClient.from('tkb_timetable_lessons').delete().eq('timetable_version_id',version.supabaseId).eq('user_id',currentAuthUser.id);
+  if(lessonError)throw lessonError;
+  const {error}=await supabaseClient.from('tkb_timetable_versions').delete().eq('id',version.supabaseId).eq('user_id',currentAuthUser.id);
+  if(error)throw error;
+}
+async function removeScheduleVersion(version){
+  await deleteTimetableVersionSupabase(version);
+  const i=scheduleVersions.indexOf(version);if(i>=0)scheduleVersions.splice(i,1);
+  saveScheduleRepository();
+}
 
 function canonicalAppendix2Records(){
   return [...lessonPlanMap.values()].map(x=>({
@@ -333,8 +346,14 @@ async function restoreSchoolCalendarFromSupabase(){
 function selectedWeekDates(){const week=Number($('weekSelect')?.value||1),r=schoolCalendar.weeks.find(x=>Number(x.week)===week)||generateSchoolWeeks('2026-09-07',[])[week-1];const start=parseLocalDate(r.start),end=parseLocalDate(r.end),days=[];for(let i=0;i<5;i++){const d=new Date(start);d.setDate(d.getDate()+i);days.push(fmtDateVN(d))}return {week,start,end,days,fmt:d=>fmtDateVN(d)}}
 function modalShell(title,body){document.getElementById('manageModal')?.remove();const m=document.createElement('div');m.id='manageModal';m.className='manage-modal';m.innerHTML=`<div class="manage-dialog"><div class="manage-head"><h3>${title}</h3><button id="manageClose">×</button></div>${body}</div>`;document.body.appendChild(m);m.querySelector('#manageClose').onclick=()=>m.remove();m.onclick=e=>{if(e.target===m)m.remove()};return m}
 function openRepoManager(){
-  const rows=scheduleVersions.map((v,i)=>`<tr><td>${i+1}</td><td>${esc(v.file)}</td><td><select data-repo-week="${i}">${Array.from({length:35},(_,j)=>`<option value="${j+1}" ${Number(v.startWeek)===j+1?'selected':''}>Tuần ${j+1}</option>`).join('')}</select></td><td>${esc(v.uploadedAtLabel||'')}</td><td>${v.lessons?.length||0}</td></tr>`).join('');
-  const m=modalShell('QUẢN LÝ KHO THỜI KHÓA BIỂU',`<p class="manage-note">Có thể điều chỉnh thủ công tuần bắt đầu hiệu lực. Các tuần trước mốc mới vẫn dùng phiên bản TKB phù hợp trước đó.</p><div class="manage-scroll"><table class="manage-table"><thead><tr><th>TT</th><th>File TKB</th><th>Hiệu lực từ</th><th>Thời điểm lưu</th><th>Số tiết</th></tr></thead><tbody>${rows||'<tr><td colspan="5">Kho TKB đang trống.</td></tr>'}</tbody></table></div><div class="manage-actions"><button id="saveRepoEffect">LƯU HIỆU LỰC</button></div>`);
+  const rows=scheduleVersions.map((v,i)=>`<tr><td>${i+1}</td><td>${esc(v.file)}</td><td><select data-repo-week="${i}">${Array.from({length:35},(_,j)=>`<option value="${j+1}" ${Number(v.startWeek)===j+1?'selected':''}>Tuần ${j+1}</option>`).join('')}</select></td><td>${esc(v.uploadedAtLabel||'')}</td><td>${v.lessons?.length||0}</td><td><button type="button" data-delete-repo="${i}">XÓA</button></td></tr>`).join('');
+  const m=modalShell('QUẢN LÝ KHO THỜI KHÓA BIỂU',`<p class="manage-note">Có thể điều chỉnh thủ công tuần bắt đầu hiệu lực. Chỉ xóa phiên bản TKB khi chắc chắn không còn cần dùng.</p><div class="manage-scroll"><table class="manage-table"><thead><tr><th>TT</th><th>File TKB</th><th>Hiệu lực từ</th><th>Thời điểm lưu</th><th>Số tiết</th><th>Thao tác</th></tr></thead><tbody>${rows||'<tr><td colspan="6">Kho TKB đang trống.</td></tr>'}</tbody></table></div><div class="manage-actions"><button id="saveRepoEffect">LƯU HIỆU LỰC</button></div>`);
+  m.querySelectorAll('[data-delete-repo]').forEach(btn=>btn.onclick=async()=>{
+    const v=scheduleVersions[Number(btn.dataset.deleteRepo)];if(!v)return;
+    if(!confirm(`Xóa phiên bản TKB "${v.file}" hiệu lực từ Tuần ${v.startWeek}?\n\nDữ liệu TKB này sẽ bị xóa khỏi Supabase. Các phiên bản khác không bị ảnh hưởng.`))return;
+    try{btn.disabled=true;btn.textContent='ĐANG XÓA...';await removeScheduleVersion(v);activateSelectedWeek();m.remove();openRepoManager();}
+    catch(e){console.error('[TKB] Không xóa được phiên bản TKB',e);btn.disabled=false;btn.textContent='XÓA';alert('Không xóa được phiên bản TKB: '+(e.message||e));}
+  });
   m.querySelector('#saveRepoEffect').onclick=async()=>{
     const btn=m.querySelector('#saveRepoEffect');
     try{
@@ -647,11 +666,20 @@ async function readWorkbooks(files){
       const now=new Date(), uploadedAt=now.toISOString(), uploadedAtLabel=now.toLocaleString('vi-VN');
       const version={startWeek:sw,uploadedAt,uploadedAtLabel,fingerprint,...parsed};
       if(!currentAuthUser){alert('Bạn cần đăng nhập giáo viên trước khi thêm TKB mới để dữ liệu được lưu đúng tài khoản trên Supabase.');continue;}
+      const sameWeek=scheduleVersions.filter(v=>Number(v.startWeek)===sw);
+      let replaceSameWeek=false;
+      if(sameWeek.length){
+        replaceSameWeek=confirm(`Tuần ${sw} hiện đã có ${sameWeek.length} phiên bản TKB.\n\nOK = lưu bản mới và THAY THẾ các phiên bản cũ cùng mốc Tuần ${sw}.\nCancel = giữ các bản cũ và thêm bản mới song song.`);
+      }
       await saveTimetableVersionToSupabase(version);
       scheduleVersions.push(version);
+      if(replaceSameWeek){
+        try{for(const oldVersion of sameWeek)await removeScheduleVersion(oldVersion)}
+        catch(cleanErr){console.error('[TKB] Bản mới đã lưu nhưng chưa dọn hết bản cũ cùng tuần',cleanErr);alert('Bản TKB mới đã được lưu và đang được ưu tiên, nhưng chưa xóa hết bản cũ cùng tuần. Bạn có thể xóa thủ công trong Kho TKB.');}
+      }
       scheduleVersions.sort((a,b)=>a.startWeek-b.startWeek||String(a.uploadedAt||'').localeCompare(String(b.uploadedAt||'')));
       saveScheduleRepository();
-      alert(`Đã lưu TKB mới vào Supabase và bộ nhớ cục bộ. Hiệu lực từ Tuần ${sw}.`);
+      alert(`Đã lưu TKB mới vào Supabase. Hiệu lực từ Tuần ${sw}.${replaceSameWeek?' Các phiên bản cũ cùng tuần đã được thay thế.':''}`);
     }catch(err){alert(`Không đọc được ${file.name}: ${err.message||err}`)}
   }
   activateSelectedWeek();
@@ -1432,3 +1460,70 @@ function ensureGoogleSheetsWeek6To35WriteButton(){
 const openOutputPreviewBeforeWeek6To35Write=openOutputPreview;
 openOutputPreview=function(){openOutputPreviewBeforeWeek6To35Write();ensureGoogleSheetsWeek6To35WriteButton();};
 const previewBtnWeek6To35Write=document.getElementById('previewBtn');if(previewBtnWeek6To35Write)previewBtnWeek6To35Write.onclick=openOutputPreview;
+
+// BƯỚC 5.2.2A - Mẫu định dạng độc lập + ghi/cập nhật Tuần 1–35.
+// Tạo một tab mẫu ẩn từ bản giáo viên hiện tại (chỉ một lần), sau đó mọi tuần đều dùng
+// khối Tuần 3 của tab mẫu ẩn. Vì vậy có thể làm sạch Tuần 1–35 ở tab giáo viên mà không mất mẫu.
+const GOOGLE_SHEETS_TEMPLATE_NAME='_TKB_TEMPLATE_VO_THANH_DAM';
+const GOOGLE_SHEETS_TEMPLATE_START_ROW=52;
+async function ensureIndependentGoogleSheetTemplate(base,headers,meta){
+  let tpl=(meta.sheets||[]).find(s=>googleSheetNameKey(s?.properties?.title)===googleSheetNameKey(GOOGLE_SHEETS_TEMPLATE_NAME));
+  if(tpl)return tpl.properties;
+  const teacher=(meta.sheets||[]).find(s=>Number(s?.properties?.sheetId)===GOOGLE_SHEETS_TEACHER_GID);
+  if(!teacher)throw new Error('Không tìm thấy tab giáo viên để tạo mẫu định dạng độc lập.');
+  const duplicate=await gsJson(`${base}:batchUpdate`,{method:'POST',headers,body:JSON.stringify({requests:[{duplicateSheet:{sourceSheetId:GOOGLE_SHEETS_TEACHER_GID,newSheetName:GOOGLE_SHEETS_TEMPLATE_NAME}}]})});
+  const p=duplicate?.replies?.[0]?.duplicateSheet?.properties;
+  if(!p?.sheetId)throw new Error('Không tạo được tab mẫu định dạng độc lập.');
+  await gsJson(`${base}:batchUpdate`,{method:'POST',headers,body:JSON.stringify({requests:[{updateSheetProperties:{properties:{sheetId:p.sheetId,hidden:true},fields:'hidden'}}]})});
+  return {...p,hidden:true};
+}
+async function exportSelectedWeek1To35ToGoogleSheet(){
+  const week=Number($('weekSelect')?.value||0);
+  const btn=document.querySelector('#outputPreviewModal .preview-google-write-week1-35'),old=btn?.textContent;
+  try{
+    if(!Number.isInteger(week)||week<1||week>35)throw new Error('Chỉ hỗ trợ Tuần 1–35.');
+    const startRow=8+(week-1)*22,endRow=startRow+21;
+    const data=outputScheduleData().map(x=>({...x}));
+    if(!data.length)throw new Error(`Tuần ${week} không có tiết dạy để ghi.`);
+    const slotMap=new Map();
+    for(const x of data){const slot=`${clean(x.thu)}|${normKey(x.buoi)}|${Number(x.tiet)||0}`;if(slotMap.has(slot)){const a=slotMap.get(slot);throw new Error(`DỪNG GHI: trùng vị trí Thứ ${x.thu} - ${x.buoi} - Tiết ${x.tiet}: ${normalizeSubjectForPlan(a.monHoc)} ${a.lop} và ${normalizeSubjectForPlan(x.monHoc)} ${x.lop}.`);}slotMap.set(slot,x);}
+    const noTitle=data.filter(x=>!clean(x.plan?.title));if(noTitle.length)throw new Error(`DỪNG GHI: còn ${noTitle.length} tiết chưa ghép tên bài Phụ lục 2.`);
+    if(btn){btn.disabled=true;btn.textContent='Đang kiểm tra...';}
+    const token=await getGoogleSheetsReadOnlyToken(),headers={Authorization:`Bearer ${token}`,'Content-Type':'application/json'},base=`https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(GOOGLE_SHEETS_SPREADSHEET_ID)}`;
+    let meta=await gsJson(`${base}?fields=properties.title,sheets.properties(sheetId,title,hidden,gridProperties)`,{headers});
+    const teacher=(meta.sheets||[]).find(s=>Number(s?.properties?.sheetId)===GOOGLE_SHEETS_TEACHER_GID);if(!teacher||googleSheetNameKey(teacher.properties.title)!==googleSheetNameKey(GOOGLE_SHEETS_TEACHER_NAME))throw new Error(`DỪNG GHI: không khớp tab ${GOOGLE_SHEETS_TEACHER_NAME} / GID ${GOOGLE_SHEETS_TEACHER_GID}.`);
+    const title=teacher.properties.title,q=gsA1Title(title),maxRows=Number(teacher.properties?.gridProperties?.rowCount)||1000;
+    if(maxRows<endRow)throw new Error(`Google Sheet chỉ có ${maxRows} dòng, chưa đủ để ghi Tuần ${week} đến dòng ${endRow}.`);
+    const tpl=await ensureIndependentGoogleSheetTemplate(base,headers,meta);
+    const templateSheetId=Number(tpl.sheetId),s0=GOOGLE_SHEETS_TEMPLATE_START_ROW-1,s1=s0+22,d0=startRow-1,d1=endRow;
+    const tplData=await gsJson(`${base}?ranges=${encodeURIComponent(GOOGLE_SHEETS_TEMPLATE_NAME+`!A${GOOGLE_SHEETS_TEMPLATE_START_ROW}:H${GOOGLE_SHEETS_TEMPLATE_START_ROW+21}`)}&includeGridData=true&fields=sheets(merges,data(rowMetadata(pixelSize)))`,{headers});
+    const srcMerges=(tplData.sheets?.[0]?.merges||[]).filter(m=>m.startRowIndex>=s0&&m.endRowIndex<=s1&&m.startColumnIndex>=0&&m.endColumnIndex<=8),srcRowMeta=tplData.sheets?.[0]?.data?.[0]?.rowMetadata||[],offset=d0-s0;
+    const scan=await gsJson(`${base}/values/${encodeURIComponent(q+`!A${startRow}:H${endRow}`)}?majorDimension=ROWS`,{headers});
+    const exists=(scan.values||[]).some(r=>googleSheetWeekFromLine((r||[]).join(' '))===week);
+    const action=exists?'CẬP NHẬT':'GHI';
+    if(!confirm(`${action} TUẦN ${week} vào tab Võ Thanh Đậm?\n\nVùng dòng ${startRow}–${endRow}. Mẫu định dạng lấy từ tab mẫu ẩn, không phụ thuộc các tuần đang tồn tại.\nTKB tuần này hiện có ${data.length} tiết; tổng kể cả kiêm nhiệm: ${data.length+getConcurrentPeriods()}.`))return;
+    if(btn)btn.textContent=`Đang ${action.toLowerCase()} Tuần ${week}...`;
+    const requests=[{unmergeCells:{range:{sheetId:GOOGLE_SHEETS_TEACHER_GID,startRowIndex:d0,endRowIndex:d1,startColumnIndex:0,endColumnIndex:8}}},{copyPaste:{source:{sheetId:templateSheetId,startRowIndex:s0,endRowIndex:s1,startColumnIndex:0,endColumnIndex:8},destination:{sheetId:GOOGLE_SHEETS_TEACHER_GID,startRowIndex:d0,endRowIndex:d1,startColumnIndex:0,endColumnIndex:8},pasteType:'PASTE_NORMAL',pasteOrientation:'NORMAL'}}];
+    srcMerges.forEach(m=>requests.push({mergeCells:{range:{sheetId:GOOGLE_SHEETS_TEACHER_GID,startRowIndex:m.startRowIndex+offset,endRowIndex:m.endRowIndex+offset,startColumnIndex:m.startColumnIndex,endColumnIndex:m.endColumnIndex},mergeType:'MERGE_ALL'}}));
+    srcRowMeta.forEach((rm,i)=>{if(rm?.pixelSize)requests.push({updateDimensionProperties:{range:{sheetId:GOOGLE_SHEETS_TEACHER_GID,dimension:'ROWS',startIndex:d0+i,endIndex:d0+i+1},properties:{pixelSize:rm.pixelSize},fields:'pixelSize'}});});
+    requests.push({repeatCell:{range:{sheetId:GOOGLE_SHEETS_TEACHER_GID,startRowIndex:d0+5,endRowIndex:d0+12,startColumnIndex:2,endColumnIndex:7},cell:{userEnteredFormat:{wrapStrategy:'WRAP'}},fields:'userEnteredFormat.wrapStrategy'}});
+    requests.push({autoResizeDimensions:{dimensions:{sheetId:GOOGLE_SHEETS_TEACHER_GID,dimension:'ROWS',startIndex:d0+5,endIndex:d0+12}}});
+    await gsJson(`${base}:batchUpdate`,{method:'POST',headers,body:JSON.stringify({requests})});
+    await gsJson(`${base}/values/${encodeURIComponent(q+`!A${startRow}:H${endRow}`)}:clear`,{method:'POST',headers,body:'{}'});
+    const payload=gsWeekRows(data,week,startRow).map(x=>({range:`${q}!${x.range}`,majorDimension:'ROWS',values:x.values}));await gsJson(`${base}/values:batchUpdate`,{method:'POST',headers,body:JSON.stringify({valueInputOption:'USER_ENTERED',data:payload})});
+    const verify=await gsJson(`${base}/values/${encodeURIComponent(q+`!A${startRow}:H${endRow}`)}?majorDimension=ROWS`,{headers}),rows=verify.values||[];
+    if(!rows.some(r=>googleSheetWeekFromLine((r||[]).join(' '))===week))throw new Error(`Đã gửi lệnh nhưng chưa đọc lại được tiêu đề Tuần ${week}.`);
+    const writtenSchedule=(rows.slice(5,12)||[]).flat().map(clean).filter(Boolean).join('\n'),expectedTitles=[...new Set(data.map(x=>clean(x.plan?.title||'')).filter(Boolean))],missingTitles=expectedTitles.filter(t=>!writtenSchedule.includes(t));if(missingTitles.length)throw new Error(`Google Sheet còn thiếu tên bài: ${missingTitles.slice(0,3).join(' | ')}.`);
+    alert(`${action} TUẦN ${week} THÀNH CÔNG\n\nVùng: dòng ${startRow}–${endRow}\nSố tiết theo TKB có hiệu lực: ${data.length}\nTổng kể cả kiêm nhiệm: ${data.length+getConcurrentPeriods()}\n\nMẫu định dạng đã độc lập với Tuần 1–35.`);
+  }catch(err){console.error(`[TKB] 5.2.2A Tuần ${week}:`,err);alert(`CHƯA GHI ĐƯỢC TUẦN ${week||''}\n\n${err?.message||err}`);}finally{if(btn){btn.disabled=false;btn.textContent=old||`Ghi/Cập nhật Tuần ${week||1} vào Google Sheet`;}}
+}
+function ensureGoogleSheetsWeek1To35WriteButton(){
+  const bar=document.querySelector('#outputPreviewModal .output-preview-bar>div');if(!bar)return;
+  bar.querySelectorAll('.preview-google-write-week4,.preview-google-write-week5,.preview-google-write-week6-35').forEach(x=>x.remove());
+  let b=bar.querySelector('.preview-google-write-week1-35'),week=Number($('weekSelect')?.value||1);
+  if(!b){const close=bar.querySelector('.preview-close');b=document.createElement('button');b.type='button';b.className='preview-google-write-week1-35';b.onclick=exportSelectedWeek1To35ToGoogleSheet;bar.insertBefore(b,close||null);}
+  b.textContent=`Ghi/Cập nhật Tuần ${week} vào Google Sheet`;b.title='BƯỚC 5.2.2A – ghi/cập nhật Tuần 1–35 bằng mẫu định dạng ẩn độc lập';
+}
+const openOutputPreviewBeforeWeek1To35Write=openOutputPreview;
+openOutputPreview=function(){openOutputPreviewBeforeWeek1To35Write();ensureGoogleSheetsWeek1To35WriteButton();};
+const previewBtnWeek1To35Write=document.getElementById('previewBtn');if(previewBtnWeek1To35Write)previewBtnWeek1To35Write.onclick=openOutputPreview;
