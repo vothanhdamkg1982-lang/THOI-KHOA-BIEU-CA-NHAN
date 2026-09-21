@@ -1465,7 +1465,7 @@ const previewBtnWeek6To35Write=document.getElementById('previewBtn');if(previewB
 // Tạo một tab mẫu ẩn từ bản giáo viên hiện tại (chỉ một lần), sau đó mọi tuần đều dùng
 // khối Tuần 3 của tab mẫu ẩn. Vì vậy có thể làm sạch Tuần 1–35 ở tab giáo viên mà không mất mẫu.
 const GOOGLE_SHEETS_TEMPLATE_NAME='_TKB_TEMPLATE_VO_THANH_DAM';
-const GOOGLE_SHEETS_TEMPLATE_START_ROW=52;
+const GOOGLE_SHEETS_TEMPLATE_START_ROW=51;
 async function ensureIndependentGoogleSheetTemplate(base,headers,meta){
   let tpl=(meta.sheets||[]).find(s=>googleSheetNameKey(s?.properties?.title)===googleSheetNameKey(GOOGLE_SHEETS_TEMPLATE_NAME));
   if(tpl)return tpl.properties;
