@@ -1731,7 +1731,12 @@ function resetGoogleSheetWeeks1To35(){openGoogleSheetResetDialog();}
 function ensureGoogleSheetsResetWeeksButton(){
   const bar=document.querySelector('#outputPreviewModal .output-preview-bar>div');if(!bar)return;
   let b=bar.querySelector('.preview-google-reset-weeks');
-  if(!b){const write=bar.querySelector('.preview-google-write-week1-35'),close=bar.querySelector('.preview-close');b=document.createElement('button');b.type='button';b.className='preview-google-reset-weeks';b.textContent='Làm mới';b.title='Làm mới tuần hiện tại, một tuần, một vùng tuần hoặc toàn bộ Tuần 1–35';b.onclick=openGoogleSheetResetDialog;bar.insertBefore(b,write||close||null);}
+  if(!b){const write=bar.querySelector('.preview-google-write-week1-35'),close=bar.querySelector('.preview-close');b=document.createElement('button');b.type='button';b.className='preview-google-reset-weeks';bar.insertBefore(b,write||close||null);}
+  // BƯỚC 5.2.14A: nút này có thể đã được tạo bởi 5.2.9 trước khi 5.2.14 chạy.
+  // Vì vậy luôn gắn lại handler mới, không chỉ gắn khi vừa tạo nút.
+  b.textContent='Làm mới';
+  b.title='Làm mới tuần hiện tại, một tuần, một vùng tuần hoặc toàn bộ Tuần 1–35';
+  b.onclick=openGoogleSheetResetDialog;
   // Nút O-R1 là công cụ kiểm tra kỹ thuật cũ; giữ logic nhưng không để chiếm chỗ trên thanh thao tác chính.
   bar.querySelector('.preview-google-readonly')?.remove();
   if(!document.getElementById('previewActionPolish')){const st=document.createElement('style');st.id='previewActionPolish';st.textContent=`#outputPreviewModal .output-preview-bar{padding:10px 14px;gap:12px}#outputPreviewModal .output-preview-bar>div{gap:7px!important;justify-content:flex-end}#outputPreviewModal .output-preview-bar button{height:36px!important;border-radius:9px!important;padding:0 13px!important;white-space:nowrap;font-weight:700!important}#outputPreviewModal .preview-google-write-week1-35{background:#0f4c81!important;color:#fff!important;border-color:#0f4c81!important}#outputPreviewModal .preview-google-reset-weeks{background:#fff7ed!important;color:#9a4b0a!important;border-color:#fdba74!important}#outputPreviewModal .preview-close{margin-left:2px;background:#f8fafc!important}`;document.head.appendChild(st);}
