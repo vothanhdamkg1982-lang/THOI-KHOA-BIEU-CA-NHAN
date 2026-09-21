@@ -217,6 +217,7 @@ async function restoreScheduleRepositoryFromSupabase(){
 }
 async function restoreAfterLogin(showMessage=false){
   try{
+    await loadGoogleSheetMappingForCurrentTeacher();
     const calendarResult=await restoreSchoolCalendarFromSupabase();
     const r=await restoreScheduleRepositoryFromSupabase();
     const appendix2Result=await restoreAppendix2FromSupabase();
@@ -235,6 +236,7 @@ async function restoreAfterLogin(showMessage=false){
 
 function updateAuthUI(user){
   currentAuthUser=user||null;
+  clearGoogleSheetMapping();
   currentSchoolYearId=null;
   const status=$('supabaseStatus'), label=$('authUserLabel'), login=$('loginBtn'), logout=$('logoutBtn');
   if(status) status.textContent=user ? '☁️ Supabase: ĐÃ KẾT NỐI • Đã đăng nhập' : '☁️ Supabase: ĐÃ KẾT NỐI • Chưa đăng nhập (dữ liệu hiện vẫn dùng localStorage)';
@@ -1047,10 +1049,40 @@ $('loginBtn')&&($('loginBtn').onclick=openAuthModal); $('logoutBtn')&&($('logout
 
 // BƯỚC 5.1.1O-R1 - Google Sheets: xác minh đúng mã mới đang chạy; vẫn CHỈ ĐỌC.
 const GOOGLE_SHEETS_CLIENT_ID='671858456606-0st6517jnk78bovre7mp3er2u6v3guhs.apps.googleusercontent.com';
-const GOOGLE_SHEETS_SPREADSHEET_ID='1EFMtbEFnPKbVH5TFsJdV9FUCSricWkiCBdbOQn0FwDo';
+let GOOGLE_SHEETS_SPREADSHEET_ID=null;
 const GOOGLE_SHEETS_LINK_GID=162218494;
-const GOOGLE_SHEETS_TEACHER_NAME='Võ Thanh Đậm';
+let GOOGLE_SHEETS_TEACHER_NAME=null;
+let GOOGLE_SHEETS_TEACHER_GID=null;
 const GOOGLE_SHEETS_SCOPE='https://www.googleapis.com/auth/spreadsheets';
+let currentGoogleSheetMapping=null;
+function clearGoogleSheetMapping(){
+  currentGoogleSheetMapping=null;
+  GOOGLE_SHEETS_SPREADSHEET_ID=null;
+  GOOGLE_SHEETS_TEACHER_NAME=null;
+  GOOGLE_SHEETS_TEACHER_GID=null;
+}
+async function loadGoogleSheetMappingForCurrentTeacher(){
+  clearGoogleSheetMapping();
+  if(!supabaseClient||!currentAuthUser?.id)return null;
+  const {data,error}=await supabaseClient.from('tkb_teacher_google_sheets')
+    .select('user_id,teacher_name,spreadsheet_id,sheet_name,sheet_gid')
+    .eq('user_id',currentAuthUser.id).maybeSingle();
+  if(error)throw new Error('Không đọc được ánh xạ Google Sheet của giáo viên: '+error.message);
+  if(!data)return null;
+  const gid=Number(data.sheet_gid);
+  if(!data.spreadsheet_id||!data.sheet_name||!Number.isInteger(gid))throw new Error('Ánh xạ Google Sheet của giáo viên chưa đầy đủ.');
+  currentGoogleSheetMapping=data;
+  GOOGLE_SHEETS_SPREADSHEET_ID=String(data.spreadsheet_id).trim();
+  GOOGLE_SHEETS_TEACHER_NAME=String(data.sheet_name).trim();
+  GOOGLE_SHEETS_TEACHER_GID=gid;
+  return data;
+}
+async function requireGoogleSheetMapping(){
+  if(!currentAuthUser?.id)throw new Error('DỪNG GOOGLE SHEET: hãy đăng nhập giáo viên trước.');
+  if(!currentGoogleSheetMapping||currentGoogleSheetMapping.user_id!==currentAuthUser.id)await loadGoogleSheetMappingForCurrentTeacher();
+  if(!currentGoogleSheetMapping)throw new Error('DỪNG GOOGLE SHEET: tài khoản này chưa được quản trị viên ánh xạ tới tab Google Sheet. Không có dữ liệu nào được ghi hoặc làm mới.');
+  return currentGoogleSheetMapping;
+}
 let googleSheetsTokenClient=null;
 function loadGoogleIdentityServices(){
   if(window.google?.accounts?.oauth2)return Promise.resolve();
@@ -1061,6 +1093,7 @@ function loadGoogleIdentityServices(){
   });
 }
 async function getGoogleSheetsReadOnlyToken(){
+  await requireGoogleSheetMapping();
   await loadGoogleIdentityServices();
   return new Promise((resolve,reject)=>{
     googleSheetsTokenClient=google.accounts.oauth2.initTokenClient({client_id:GOOGLE_SHEETS_CLIENT_ID,scope:GOOGLE_SHEETS_SCOPE,callback:r=>{if(r?.error)return reject(new Error(r.error_description||r.error));if(!r?.access_token)return reject(new Error('Google không trả về access token.'));resolve(r.access_token);}});
@@ -1128,7 +1161,6 @@ if(previewBtnGoogleReadOnly)previewBtnGoogleReadOnly.onclick=openOutputPreview;
 
 // BƯỚC 5.1.3Q - Tuần 4: giữ nguyên nội dung 5.1.3P đã Đạt; bật xuống dòng tự động cho ô bài dạy trên Google Sheet.
 // Chỉ ghi khi: đúng Spreadsheet, đúng tab/GID, đang chọn Tuần 4, Google Sheet chưa có Tuần 4.
-const GOOGLE_SHEETS_TEACHER_GID=1908030276;
 function gsA1Title(title){return `'${String(title).replace(/'/g,"''")}'`;}
 async function gsJson(url,options={}){
   const res=await fetch(url,options); let body={}; try{body=await res.json()}catch(e){}
@@ -1466,14 +1498,14 @@ const previewBtnWeek6To35Write=document.getElementById('previewBtn');if(previewB
 // BƯỚC 5.2.2A - Mẫu định dạng độc lập + ghi/cập nhật Tuần 1–35.
 // Tạo một tab mẫu ẩn từ bản giáo viên hiện tại (chỉ một lần), sau đó mọi tuần đều dùng
 // khối Tuần 3 của tab mẫu ẩn. Vì vậy có thể làm sạch Tuần 1–35 ở tab giáo viên mà không mất mẫu.
-const GOOGLE_SHEETS_TEMPLATE_NAME='_TKB_TEMPLATE_VO_THANH_DAM';
+function googleSheetsTemplateName(){return `_TKB_TEMPLATE_${GOOGLE_SHEETS_TEACHER_GID}`;}
 const GOOGLE_SHEETS_TEMPLATE_START_ROW=51;
 async function ensureIndependentGoogleSheetTemplate(base,headers,meta){
-  let tpl=(meta.sheets||[]).find(s=>googleSheetNameKey(s?.properties?.title)===googleSheetNameKey(GOOGLE_SHEETS_TEMPLATE_NAME));
+  let tpl=(meta.sheets||[]).find(s=>googleSheetNameKey(s?.properties?.title)===googleSheetNameKey(googleSheetsTemplateName()));
   if(tpl)return tpl.properties;
   const teacher=(meta.sheets||[]).find(s=>Number(s?.properties?.sheetId)===GOOGLE_SHEETS_TEACHER_GID);
   if(!teacher)throw new Error('Không tìm thấy tab giáo viên để tạo mẫu định dạng độc lập.');
-  const duplicate=await gsJson(`${base}:batchUpdate`,{method:'POST',headers,body:JSON.stringify({requests:[{duplicateSheet:{sourceSheetId:GOOGLE_SHEETS_TEACHER_GID,newSheetName:GOOGLE_SHEETS_TEMPLATE_NAME}}]})});
+  const duplicate=await gsJson(`${base}:batchUpdate`,{method:'POST',headers,body:JSON.stringify({requests:[{duplicateSheet:{sourceSheetId:GOOGLE_SHEETS_TEACHER_GID,newSheetName:googleSheetsTemplateName()}}]})});
   const p=duplicate?.replies?.[0]?.duplicateSheet?.properties;
   if(!p?.sheetId)throw new Error('Không tạo được tab mẫu định dạng độc lập.');
   await gsJson(`${base}:batchUpdate`,{method:'POST',headers,body:JSON.stringify({requests:[{updateSheetProperties:{properties:{sheetId:p.sheetId,hidden:true},fields:'hidden'}}]})});
@@ -1507,7 +1539,7 @@ async function exportSelectedWeek1To35ToGoogleSheet(){
     const d0=startRow-1,d1=specialWeek1?26:endRow;
     const templateReadStart=GOOGLE_SHEETS_TEMPLATE_START_ROW+(specialWeek1?3:0);
     const templateReadEnd=GOOGLE_SHEETS_TEMPLATE_START_ROW+21;
-    const tplData=await gsJson(`${base}?ranges=${encodeURIComponent(GOOGLE_SHEETS_TEMPLATE_NAME+`!A${templateReadStart}:H${templateReadEnd}`)}&includeGridData=true&fields=sheets(merges,data(rowMetadata(pixelSize)))`,{headers});
+    const tplData=await gsJson(`${base}?ranges=${encodeURIComponent(googleSheetsTemplateName()+`!A${templateReadStart}:H${templateReadEnd}`)}&includeGridData=true&fields=sheets(merges,data(rowMetadata(pixelSize)))`,{headers});
     const srcMerges=(tplData.sheets?.[0]?.merges||[]).filter(m=>m.startRowIndex>=s0&&m.endRowIndex<=s1&&m.startColumnIndex>=0&&m.endColumnIndex<=8),srcRowMeta=tplData.sheets?.[0]?.data?.[0]?.rowMetadata||[],offset=d0-s0;
     const scan=await gsJson(`${base}/values/${encodeURIComponent(q+`!A${startRow}:H${endRow}`)}?majorDimension=ROWS`,{headers});
     const exists=(scan.values||[]).some(r=>googleSheetWeekFromLine((r||[]).join(' '))===week);
