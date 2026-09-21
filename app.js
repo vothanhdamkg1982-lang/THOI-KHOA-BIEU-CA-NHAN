@@ -1571,7 +1571,9 @@ async function exportSelectedWeek1To35ToGoogleSheet(){
       sumReq.push({repeatCell:{range:{sheetId:GOOGLE_SHEETS_TEACHER_GID,startRowIndex:sr+11,endRowIndex:sr+20,startColumnIndex:1,endColumnIndex:8},cell:{userEnteredFormat:{horizontalAlignment:'CENTER',verticalAlignment:'MIDDLE',wrapStrategy:'WRAP',textFormat:{fontFamily:'Times New Roman',fontSize:12}}},fields:'userEnteredFormat(horizontalAlignment,verticalAlignment,wrapStrategy,textFormat)'}});
       sumReq.push({repeatCell:{range:{sheetId:GOOGLE_SHEETS_TEACHER_GID,startRowIndex:sr+13,endRowIndex:sr+20,startColumnIndex:1,endColumnIndex:8},cell:{userEnteredFormat:{borders:{top:{style:'SOLID'},bottom:{style:'SOLID'},left:{style:'SOLID'},right:{style:'SOLID'}}}},fields:'userEnteredFormat.borders'}});
       sumReq.push({repeatCell:{range:{sheetId:GOOGLE_SHEETS_TEACHER_GID,startRowIndex:sr+11,endRowIndex:sr+14,startColumnIndex:1,endColumnIndex:8},cell:{userEnteredFormat:{textFormat:{bold:true,fontFamily:'Times New Roman',fontSize:12}}},fields:'userEnteredFormat.textFormat'}});
-      sumReq.push({repeatCell:{range:{sheetId:GOOGLE_SHEETS_TEACHER_GID,startRowIndex:sr+19,endRowIndex:sr+20,startColumnIndex:1,endColumnIndex:8},cell:{userEnteredFormat:{textFormat:{bold:true,fontFamily:'Times New Roman',fontSize:12}}},fields:'userEnteredFormat.textFormat'}});
+      // BƯỚC 5.2.13A: Google Sheets dùng chỉ số hàng 0-based; dòng r(19) tương ứng sr+18.
+      // In đậm đúng dòng Tổng số, không định dạng nhầm dòng trống bên dưới.
+      sumReq.push({repeatCell:{range:{sheetId:GOOGLE_SHEETS_TEACHER_GID,startRowIndex:sr+18,endRowIndex:sr+19,startColumnIndex:1,endColumnIndex:8},cell:{userEnteredFormat:{textFormat:{bold:true,fontFamily:'Times New Roman',fontSize:12}}},fields:'userEnteredFormat.textFormat'}});
       await gsJson(`${base}:batchUpdate`,{method:'POST',headers,body:JSON.stringify({requests:sumReq})});
     }
     // Tuần 1: giữ nguyên PHỤ LỤC 1.4 ở hàng 4 và ghi lại đúng 3 dòng tiêu đề hàng 5–7;
