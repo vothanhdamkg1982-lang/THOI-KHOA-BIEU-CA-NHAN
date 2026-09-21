@@ -234,6 +234,7 @@ async function restoreAfterLogin(showMessage=false){
 }
 
 function updateAuthUI(user){
+  if(currentAuthUser?.id!==(user?.id||null)&&typeof clearGoogleSheetsTeacherMapping==='function')clearGoogleSheetsTeacherMapping();
   currentAuthUser=user||null;
   currentSchoolYearId=null;
   const status=$('supabaseStatus'), label=$('authUserLabel'), login=$('loginBtn'), logout=$('logoutBtn');
@@ -1047,11 +1048,31 @@ $('loginBtn')&&($('loginBtn').onclick=openAuthModal); $('logoutBtn')&&($('logout
 
 // BƯỚC 5.1.1O-R1 - Google Sheets: xác minh đúng mã mới đang chạy; vẫn CHỈ ĐỌC.
 const GOOGLE_SHEETS_CLIENT_ID='671858456606-0st6517jnk78bovre7mp3er2u6v3guhs.apps.googleusercontent.com';
-const GOOGLE_SHEETS_SPREADSHEET_ID='1EFMtbEFnPKbVH5TFsJdV9FUCSricWkiCBdbOQn0FwDo';
+let GOOGLE_SHEETS_SPREADSHEET_ID='';
 const GOOGLE_SHEETS_LINK_GID=162218494;
-const GOOGLE_SHEETS_TEACHER_NAME='Võ Thanh Đậm';
+let GOOGLE_SHEETS_TEACHER_NAME='';
 const GOOGLE_SHEETS_SCOPE='https://www.googleapis.com/auth/spreadsheets';
 let googleSheetsTokenClient=null;
+let googleSheetsMappingUserId=null;
+async function ensureGoogleSheetsTeacherMapping(){
+  if(!currentAuthUser?.id)throw new Error('Hãy đăng nhập giáo viên trước khi thao tác Google Sheet.');
+  if(googleSheetsMappingUserId===currentAuthUser.id&&GOOGLE_SHEETS_SPREADSHEET_ID&&GOOGLE_SHEETS_TEACHER_NAME&&Number.isFinite(Number(GOOGLE_SHEETS_TEACHER_GID)))return;
+  if(!supabaseClient)throw new Error('Supabase chưa sẵn sàng để xác định Google Sheet của giáo viên.');
+  const {data,error}=await supabaseClient.from('tkb_teacher_google_sheets').select('spreadsheet_id,sheet_name,sheet_gid').eq('user_id',currentAuthUser.id).maybeSingle();
+  if(error)throw new Error('Không đọc được ánh xạ Google Sheet của tài khoản này: '+error.message);
+  if(!data?.spreadsheet_id||!data?.sheet_name||data?.sheet_gid===null||data?.sheet_gid===undefined)throw new Error('Tài khoản này chưa được phân công tab Google Sheet. DỪNG thao tác để tránh ghi nhầm dữ liệu.');
+  GOOGLE_SHEETS_SPREADSHEET_ID=String(data.spreadsheet_id).trim();
+  GOOGLE_SHEETS_TEACHER_NAME=String(data.sheet_name).trim();
+  GOOGLE_SHEETS_TEACHER_GID=Number(data.sheet_gid);
+  if(!GOOGLE_SHEETS_SPREADSHEET_ID||!GOOGLE_SHEETS_TEACHER_NAME||!Number.isFinite(GOOGLE_SHEETS_TEACHER_GID))throw new Error('Ánh xạ Google Sheet của tài khoản không hợp lệ. DỪNG thao tác.');
+  googleSheetsMappingUserId=currentAuthUser.id;
+}
+function clearGoogleSheetsTeacherMapping(){
+  GOOGLE_SHEETS_SPREADSHEET_ID='';
+  GOOGLE_SHEETS_TEACHER_NAME='';
+  GOOGLE_SHEETS_TEACHER_GID=null;
+  googleSheetsMappingUserId=null;
+}
 function loadGoogleIdentityServices(){
   if(window.google?.accounts?.oauth2)return Promise.resolve();
   return new Promise((resolve,reject)=>{
@@ -1061,6 +1082,7 @@ function loadGoogleIdentityServices(){
   });
 }
 async function getGoogleSheetsReadOnlyToken(){
+  await ensureGoogleSheetsTeacherMapping();
   await loadGoogleIdentityServices();
   return new Promise((resolve,reject)=>{
     googleSheetsTokenClient=google.accounts.oauth2.initTokenClient({client_id:GOOGLE_SHEETS_CLIENT_ID,scope:GOOGLE_SHEETS_SCOPE,callback:r=>{if(r?.error)return reject(new Error(r.error_description||r.error));if(!r?.access_token)return reject(new Error('Google không trả về access token.'));resolve(r.access_token);}});
@@ -1128,7 +1150,7 @@ if(previewBtnGoogleReadOnly)previewBtnGoogleReadOnly.onclick=openOutputPreview;
 
 // BƯỚC 5.1.3Q - Tuần 4: giữ nguyên nội dung 5.1.3P đã Đạt; bật xuống dòng tự động cho ô bài dạy trên Google Sheet.
 // Chỉ ghi khi: đúng Spreadsheet, đúng tab/GID, đang chọn Tuần 4, Google Sheet chưa có Tuần 4.
-const GOOGLE_SHEETS_TEACHER_GID=1908030276;
+let GOOGLE_SHEETS_TEACHER_GID=null;
 function gsA1Title(title){return `'${String(title).replace(/'/g,"''")}'`;}
 async function gsJson(url,options={}){
   const res=await fetch(url,options); let body={}; try{body=await res.json()}catch(e){}
