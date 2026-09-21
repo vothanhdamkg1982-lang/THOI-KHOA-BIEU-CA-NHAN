@@ -1097,7 +1097,7 @@ const previewBtnGoogleReadOnly=document.getElementById('previewBtn');
 if(previewBtnGoogleReadOnly)previewBtnGoogleReadOnly.onclick=openOutputPreview;
 
 
-// BƯỚC 5.1.3O - Tuần 4: ghi đúng chính dữ liệu đang hiển thị trong Xem trước sang Google Sheet.
+// BƯỚC 5.1.3P - Tuần 4: làm sạch tiêu đề/tổng số khi ghi Google Sheet; giữ nguyên dữ liệu đã Đạt ở 5.1.3O.
 // Chỉ ghi khi: đúng Spreadsheet, đúng tab/GID, đang chọn Tuần 4, Google Sheet chưa có Tuần 4.
 const GOOGLE_SHEETS_TEACHER_GID=1908030276;
 function gsA1Title(title){return `'${String(title).replace(/'/g,"''")}'`;}
@@ -1152,7 +1152,10 @@ function gsWeek4Rows(data){
   ];
   const values=[];
   values.push({range:'A74',values:[[`Hoạt động giáo dục tuần 04`]]});
-  values.push({range:'A75',values:[[`Năm học 2026 – 2027. ${formalSubjectGradeText(data)}, Trường TH – THCS & THPT Lại Sơn`]]});
+  // Mẫu Tuần 3 có ô A75 riêng chứa nhãn 'Năm học', còn tiêu đề chính nằm từ B75.
+  // Ghi đúng vào B75 để không tạo chữ thừa ở mép trái; đồng thời bổ sung môn Đạo đức.
+  values.push({range:'A75',values:[['']]});
+  values.push({range:'B75',values:[[`Năm học 2026 – 2027. Môn: Tin học, Công nghệ, Đạo đức – Khối: 3, 4, 5 – Trường TH – THCS & THPT Lại Sơn`]]});
   values.push({range:'A76',values:[[`Tuần 4: từ ngày ${wd.fmt(wd.start)} đến ${wd.fmt(wd.end)}`]]});
   values.push({range:'C77:G77',values:[[...wd.days.map(d=>`Ngày ${d}`)]]});
   values.push({range:'C78:G78',values:[[...labels]]});
@@ -1160,7 +1163,9 @@ function gsWeek4Rows(data){
   for(let t=1;t<=4;t++)schedule.push(days.map(day=>cell(day,'Sáng',t)));
   for(let t=1;t<=3;t++)schedule.push(days.map(day=>cell(day,'Chiều',t)));
   values.push({range:'C79:G85',values:schedule});
-  values.push({range:'A86',values:[[`Tổng số: ${data.length} tiết`]]});
+  // Không ghi Tổng số vào A86: mẫu sao chép đã có dòng Tổng số đúng ở giữa bảng.
+  // Chỉ xóa giá trị thừa ở mép trái để tránh xuất hiện 'Tổng số: 20...' ngoài khung.
+  values.push({range:'A86',values:[['']]});
   details.forEach((x,i)=>{
     const row=89+i;
     values.push({range:`B${row}`,values:[[i+1]]});
@@ -1174,7 +1179,7 @@ function gsWeek4Rows(data){
 async function exportWeek4ToGoogleSheet(){
   const btn=document.querySelector('#outputPreviewModal .preview-google-write-week4'), old=btn?.textContent;
   try{
-    if(Number($('weekSelect')?.value)!==4)throw new Error('BƯỚC 5.1.3O chỉ cho phép ghi Tuần 4. Hãy chọn Tuần 4 trước.');
+    if(Number($('weekSelect')?.value)!==4)throw new Error('BƯỚC 5.1.3P chỉ cho phép ghi Tuần 4. Hãy chọn Tuần 4 trước.');
     // BƯỚC 5.1.3O: dùng CHÍNH dữ liệu đã ghép đang tạo bản Xem trước.
     // Nhờ đó Môn + Lớp + Tên bài + Tiết bài ghi sang Google Sheet phải trùng với bản giáo viên vừa kiểm tra.
     // outputScheduleData() tự applyLessonPlan() và áp dụng lớp điều chỉnh xuất (nếu giáo viên đã sửa trong Xem trước).
@@ -1267,7 +1272,7 @@ async function exportWeek4ToGoogleSheet(){
 }
 function ensureGoogleSheetsWeek4WriteButton(){
   const bar=document.querySelector('#outputPreviewModal .output-preview-bar>div'); if(!bar||bar.querySelector('.preview-google-write-week4'))return;
-  const close=bar.querySelector('.preview-close'); const b=document.createElement('button'); b.type='button';b.className='preview-google-write-week4';b.textContent='Ghi Tuần 4 vào Google Sheet';b.title='BƯỚC 5.1.3O – ghi chính dữ liệu Xem trước đã kiểm tra sang Google Sheet, gồm đầy đủ tên bài';b.onclick=exportWeek4ToGoogleSheet;bar.insertBefore(b,close||null);
+  const close=bar.querySelector('.preview-close'); const b=document.createElement('button'); b.type='button';b.className='preview-google-write-week4';b.textContent='Ghi Tuần 4 vào Google Sheet';b.title='BƯỚC 5.1.3P – ghi Tuần 4 sạch mép trái, tiêu đề có Tin học, Công nghệ, Đạo đức; giữ nguyên dữ liệu đã kiểm tra';b.onclick=exportWeek4ToGoogleSheet;bar.insertBefore(b,close||null);
 }
 const openOutputPreviewBeforeWeek4Write=openOutputPreview;
 openOutputPreview=function(){openOutputPreviewBeforeWeek4Write();ensureGoogleSheetsWeek4WriteButton();};
