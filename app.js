@@ -1015,3 +1015,63 @@ function printSchedule(){
   const restore=()=>{document.body.classList.remove('printing-formal');holder.remove();window.removeEventListener('afterprint',restore)};window.addEventListener('afterprint',restore);setTimeout(()=>window.print(),80)
 }
 $('loginBtn')&&($('loginBtn').onclick=openAuthModal); $('logoutBtn')&&($('logoutBtn').onclick=logoutTeacher); initWeekSelect(); initSupabaseConnection(); loadScheduleRepository(); loadSchoolCalendar(); activateSelectedWeek(); $('fileInput').addEventListener('change',e=>e.target.files.length&&readWorkbooks(e.target.files)); $('pl2Input').addEventListener('change',e=>e.target.files[0]&&readLessonPlan(e.target.files[0])); $('weekSelect').addEventListener('change',()=>{saveOutputSettings();activateSelectedWeek()}); $('calendarBtn')&&($('calendarBtn').onclick=openCalendarManager); $('repoBtn')&&($('repoBtn').onclick=openRepoManager); $('appendix2RepoBtn')&&($('appendix2RepoBtn').onclick=openAppendix2RepoManager); $('concurrentPeriods').addEventListener('change',()=>{if(Number($('concurrentPeriods').value)<0)$('concurrentPeriods').value=0;saveOutputSettings()}); ['fThu','fBuoi','fPoint','fClass'].forEach(id=>$(id).addEventListener('change',render)); $('tableBtn').onclick=()=>{currentView='table';render()}; $('weekBtn').onclick=()=>{currentView='week';render()}; $('excelBtn').onclick=exportExcel; $('pdfBtn').onclick=exportPDF; $('printBtn').onclick=printSchedule; ensurePreviewButton();
+
+// BƯỚC 5.1.1N - Google Sheets: kiểm tra kết nối CHỈ ĐỌC, chưa có lệnh ghi/sửa/xóa.
+const GOOGLE_SHEETS_CLIENT_ID='671858456606-0st6517jnk78bovre7mp3er2u6v3guhs.apps.googleusercontent.com';
+const GOOGLE_SHEETS_SPREADSHEET_ID='1EFMtbEFnPKbVH5TFsJdV9FUCSricWkiCBdbOQn0FwDo';
+const GOOGLE_SHEETS_TARGET_GID=162218494;
+const GOOGLE_SHEETS_READONLY_SCOPE='https://www.googleapis.com/auth/spreadsheets.readonly';
+let googleSheetsTokenClient=null;
+function loadGoogleIdentityServices(){
+  if(window.google?.accounts?.oauth2)return Promise.resolve();
+  return new Promise((resolve,reject)=>{
+    const old=document.getElementById('googleIdentityServicesScript');
+    if(old){old.addEventListener('load',resolve,{once:true});old.addEventListener('error',()=>reject(new Error('Không tải được Google Identity Services.')),{once:true});return;}
+    const s=document.createElement('script');s.id='googleIdentityServicesScript';s.src='https://accounts.google.com/gsi/client';s.async=true;s.defer=true;s.onload=resolve;s.onerror=()=>reject(new Error('Không tải được Google Identity Services.'));document.head.appendChild(s);
+  });
+}
+async function getGoogleSheetsReadOnlyToken(){
+  await loadGoogleIdentityServices();
+  return new Promise((resolve,reject)=>{
+    googleSheetsTokenClient=google.accounts.oauth2.initTokenClient({client_id:GOOGLE_SHEETS_CLIENT_ID,scope:GOOGLE_SHEETS_READONLY_SCOPE,callback:r=>{if(r?.error)return reject(new Error(r.error_description||r.error));if(!r?.access_token)return reject(new Error('Google không trả về access token.'));resolve(r.access_token);}});
+    googleSheetsTokenClient.requestAccessToken({prompt:'consent'});
+  });
+}
+async function checkGoogleSheetReadOnly(){
+  const btn=document.querySelector('#outputPreviewModal .preview-google-readonly');
+  const oldText=btn?.textContent;
+  try{
+    if(btn){btn.disabled=true;btn.textContent='Đang kiểm tra...';}
+    const token=await getGoogleSheetsReadOnlyToken();
+    const headers={Authorization:`Bearer ${token}`};
+    const metaUrl=`https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(GOOGLE_SHEETS_SPREADSHEET_ID)}?fields=properties.title,sheets.properties(sheetId,title,index)`;
+    const metaRes=await fetch(metaUrl,{headers});
+    const meta=await metaRes.json();
+    if(!metaRes.ok)throw new Error(meta?.error?.message||'Không đọc được thông tin Google Sheet.');
+    const target=(meta.sheets||[]).find(s=>Number(s?.properties?.sheetId)===GOOGLE_SHEETS_TARGET_GID);
+    if(!target)throw new Error(`Không tìm thấy sheet có gid=${GOOGLE_SHEETS_TARGET_GID}.`);
+    const title=target.properties.title;
+    const range=`'${String(title).replace(/'/g,"''")}'!A:K`;
+    const valuesUrl=`https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(GOOGLE_SHEETS_SPREADSHEET_ID)}/values/${encodeURIComponent(range)}?majorDimension=ROWS`;
+    const valuesRes=await fetch(valuesUrl,{headers});
+    const valuesJson=await valuesRes.json();
+    if(!valuesRes.ok)throw new Error(valuesJson?.error?.message||'Không đọc được dữ liệu của sheet đích.');
+    const rows=valuesJson.values||[];
+    const weeks=[];
+    rows.forEach((row,i)=>{const line=(row||[]).join(' ').replace(/\s+/g,' ').trim();const m=line.match(/Hoạt\s*động\s*giáo\s*dục\s*tuần\s*0?(\d{1,2})/i);if(m)weeks.push({week:Number(m[1]),row:i+1});});
+    const weekText=weeks.length?weeks.map(x=>`Tuần ${x.week} (dòng ${x.row})`).join(', '):'chưa nhận diện được tiêu đề tuần trong cột A:K';
+    alert(`KẾT NỐI GOOGLE SHEETS CHỈ ĐỌC THÀNH CÔNG\n\nTệp: ${meta.properties?.title||GOOGLE_SHEETS_SPREADSHEET_ID}\nSheet đúng gid ${GOOGLE_SHEETS_TARGET_GID}: ${title}\nSố dòng đã đọc: ${rows.length}\nNhận diện: ${weekText}\n\nBước này chỉ đọc; app chưa có quyền và chưa có lệnh ghi/sửa/xóa Google Sheet.`);
+  }catch(err){console.error('Google Sheets read-only check:',err);alert(`Chưa đọc được Google Sheet.\n\n${err?.message||err}`);}
+  finally{if(btn){btn.disabled=false;btn.textContent=oldText||'Kiểm tra Google Sheet';}}
+}
+function ensureGoogleSheetsReadOnlyPreviewButton(){
+  const bar=document.querySelector('#outputPreviewModal .output-preview-bar>div');
+  if(!bar||bar.querySelector('.preview-google-readonly'))return;
+  const close=bar.querySelector('.preview-close');
+  const b=document.createElement('button');b.type='button';b.className='preview-google-readonly';b.textContent='Kiểm tra Google Sheet';b.title='Đăng nhập Google và kiểm tra chỉ đọc sheet được nhà trường cấp';b.onclick=checkGoogleSheetReadOnly;
+  bar.insertBefore(b,close||null);
+}
+const openOutputPreviewBeforeGoogleReadOnly=openOutputPreview;
+openOutputPreview=function(){openOutputPreviewBeforeGoogleReadOnly();ensureGoogleSheetsReadOnlyPreviewButton();};
+const previewBtnGoogleReadOnly=document.getElementById('previewBtn');
+if(previewBtnGoogleReadOnly)previewBtnGoogleReadOnly.onclick=openOutputPreview;
