@@ -1521,6 +1521,23 @@ async function exportSelectedWeek1To35ToGoogleSheet(){
     requests.push({repeatCell:{range:{sheetId:GOOGLE_SHEETS_TEACHER_GID,startRowIndex:scheduleStartIndex,endRowIndex:scheduleEndIndex,startColumnIndex:2,endColumnIndex:7},cell:{userEnteredFormat:{wrapStrategy:'WRAP'}},fields:'userEnteredFormat.wrapStrategy'}});
     requests.push({autoResizeDimensions:{dimensions:{sheetId:GOOGLE_SHEETS_TEACHER_GID,dimension:'ROWS',startIndex:scheduleStartIndex,endIndex:scheduleEndIndex}}});
     await gsJson(`${base}:batchUpdate`,{method:'POST',headers,body:JSON.stringify({requests})});
+    // BƯỚC 5.2.11: khôi phục đúng hai cột bên trái của Phụ lục 1.4 cho mọi tuần.
+    // Cột A = Buổi (Sáng/Chiều), cột B = Tiết; hàng trên cùng của hai cột là "Thời gian".
+    // Chỉ tác động A:B trong phần lịch, không thay đổi dữ liệu bài học C:G hay phần Tổng hợp.
+    const leftHeaderRow=specialWeek1?8:startRow+3;
+    const leftSubHeaderRow=leftHeaderRow+1;
+    const leftScheduleStart=leftHeaderRow+2;
+    const leftScheduleEnd=leftScheduleStart+7;
+    const leftReq=[
+      {unmergeCells:{range:{sheetId:GOOGLE_SHEETS_TEACHER_GID,startRowIndex:leftHeaderRow-1,endRowIndex:leftScheduleEnd-1,startColumnIndex:0,endColumnIndex:2}}},
+      {mergeCells:{range:{sheetId:GOOGLE_SHEETS_TEACHER_GID,startRowIndex:leftHeaderRow-1,endRowIndex:leftHeaderRow,startColumnIndex:0,endColumnIndex:2},mergeType:'MERGE_ALL'}},
+      {mergeCells:{range:{sheetId:GOOGLE_SHEETS_TEACHER_GID,startRowIndex:leftScheduleStart-1,endRowIndex:leftScheduleStart+3,startColumnIndex:0,endColumnIndex:1},mergeType:'MERGE_ALL'}},
+      {mergeCells:{range:{sheetId:GOOGLE_SHEETS_TEACHER_GID,startRowIndex:leftScheduleStart+3,endRowIndex:leftScheduleEnd-1,startColumnIndex:0,endColumnIndex:1},mergeType:'MERGE_ALL'}},
+      {repeatCell:{range:{sheetId:GOOGLE_SHEETS_TEACHER_GID,startRowIndex:leftHeaderRow-1,endRowIndex:leftScheduleEnd-1,startColumnIndex:0,endColumnIndex:2},cell:{userEnteredFormat:{horizontalAlignment:'CENTER',verticalAlignment:'MIDDLE',wrapStrategy:'WRAP',textFormat:{fontFamily:'Times New Roman',fontSize:12}}},fields:'userEnteredFormat(horizontalAlignment,verticalAlignment,wrapStrategy,textFormat)'}},
+      {repeatCell:{range:{sheetId:GOOGLE_SHEETS_TEACHER_GID,startRowIndex:leftHeaderRow-1,endRowIndex:leftSubHeaderRow,startColumnIndex:0,endColumnIndex:2},cell:{userEnteredFormat:{textFormat:{bold:true,fontFamily:'Times New Roman',fontSize:12}}},fields:'userEnteredFormat.textFormat'}},
+      {repeatCell:{range:{sheetId:GOOGLE_SHEETS_TEACHER_GID,startRowIndex:leftScheduleStart-1,endRowIndex:leftScheduleEnd-1,startColumnIndex:0,endColumnIndex:2},cell:{userEnteredFormat:{borders:{top:{style:'SOLID'},bottom:{style:'SOLID'},left:{style:'SOLID'},right:{style:'SOLID'}}}},fields:'userEnteredFormat.borders'}}
+    ];
+    await gsJson(`${base}:batchUpdate`,{method:'POST',headers,body:JSON.stringify({requests:leftReq})});
     if(specialWeek1){
       // BƯỚC 5.2.8: dựng đúng khối cuối Tuần 1 như Xem trước.
       const sumReq=[
@@ -1629,6 +1646,15 @@ async function exportSelectedWeek1To35ToGoogleSheet(){
         {range:`B${r(19)}:H${r(19)}`,values:[['','Tổng số','',data.length+concurrent,'','','']]}
       );
     }
+    // BƯỚC 5.2.11: ghi lại nhãn Thời gian/Buổi, Sáng/Chiều và số Tiết sau mọi phép dịch hàng của Tuần 1.
+    weekRows.push(
+      {range:`A${leftHeaderRow}:B${leftHeaderRow}`,values:[['Thời gian','']]},
+      {range:`A${leftSubHeaderRow}:B${leftSubHeaderRow}`,values:[['Buổi','Tiết']]},
+      {range:`A${leftScheduleStart}`,values:[['Sáng']]},
+      {range:`B${leftScheduleStart}:B${leftScheduleStart+3}`,values:[[1],[2],[3],[4]]},
+      {range:`A${leftScheduleStart+4}`,values:[['Chiều']]},
+      {range:`B${leftScheduleStart+4}:B${leftScheduleStart+6}`,values:[[1],[2],[3]]}
+    );
     const payload=weekRows.map(x=>({range:`${q}!${x.range}`,majorDimension:'ROWS',values:x.values}));await gsJson(`${base}/values:batchUpdate`,{method:'POST',headers,body:JSON.stringify({valueInputOption:'USER_ENTERED',data:payload})});
     // BƯỚC 5.2.7: với Tuần 1, tiêu đề tuần nằm ở hàng 5–7, ngoài vùng A8:H29.
     // Đọc đúng vùng tiêu đề để xác minh, tránh báo thất bại giả sau khi Google Sheet đã ghi thành công.
