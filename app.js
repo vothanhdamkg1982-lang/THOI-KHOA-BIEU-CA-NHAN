@@ -1016,14 +1016,12 @@ function printSchedule(){
 }
 $('loginBtn')&&($('loginBtn').onclick=openAuthModal); $('logoutBtn')&&($('logoutBtn').onclick=logoutTeacher); initWeekSelect(); initSupabaseConnection(); loadScheduleRepository(); loadSchoolCalendar(); activateSelectedWeek(); $('fileInput').addEventListener('change',e=>e.target.files.length&&readWorkbooks(e.target.files)); $('pl2Input').addEventListener('change',e=>e.target.files[0]&&readLessonPlan(e.target.files[0])); $('weekSelect').addEventListener('change',()=>{saveOutputSettings();activateSelectedWeek()}); $('calendarBtn')&&($('calendarBtn').onclick=openCalendarManager); $('repoBtn')&&($('repoBtn').onclick=openRepoManager); $('appendix2RepoBtn')&&($('appendix2RepoBtn').onclick=openAppendix2RepoManager); $('concurrentPeriods').addEventListener('change',()=>{if(Number($('concurrentPeriods').value)<0)$('concurrentPeriods').value=0;saveOutputSettings()}); ['fThu','fBuoi','fPoint','fClass'].forEach(id=>$(id).addEventListener('change',render)); $('tableBtn').onclick=()=>{currentView='table';render()}; $('weekBtn').onclick=()=>{currentView='week';render()}; $('excelBtn').onclick=exportExcel; $('pdfBtn').onclick=exportPDF; $('printBtn').onclick=printSchedule; ensurePreviewButton();
 
-// BƯỚC 5.1.2B - Google Sheets: thử quyền GHI an toàn trên đúng tab Võ Thanh Đậm.
+// BƯỚC 5.1.1O-R1 - Google Sheets: xác minh đúng mã mới đang chạy; vẫn CHỈ ĐỌC.
 const GOOGLE_SHEETS_CLIENT_ID='671858456606-0st6517jnk78bovre7mp3er2u6v3guhs.apps.googleusercontent.com';
 const GOOGLE_SHEETS_SPREADSHEET_ID='1EFMtbEFnPKbVH5TFsJdV9FUCSricWkiCBdbOQn0FwDo';
 const GOOGLE_SHEETS_LINK_GID=162218494;
 const GOOGLE_SHEETS_TEACHER_NAME='Võ Thanh Đậm';
-const GOOGLE_SHEETS_TEACHER_GID=1908030276;
-const GOOGLE_SHEETS_WRITE_SCOPE='https://www.googleapis.com/auth/spreadsheets';
-const GOOGLE_SHEETS_SAFE_TEST_CELL='Z1000';
+const GOOGLE_SHEETS_SCOPE='https://www.googleapis.com/auth/spreadsheets';
 let googleSheetsTokenClient=null;
 function loadGoogleIdentityServices(){
   if(window.google?.accounts?.oauth2)return Promise.resolve();
@@ -1033,21 +1031,27 @@ function loadGoogleIdentityServices(){
     const s=document.createElement('script');s.id='googleIdentityServicesScript';s.src='https://accounts.google.com/gsi/client';s.async=true;s.defer=true;s.onload=resolve;s.onerror=()=>reject(new Error('Không tải được Google Identity Services.'));document.head.appendChild(s);
   });
 }
-async function getGoogleSheetsWriteToken(){
+async function getGoogleSheetsReadOnlyToken(){
   await loadGoogleIdentityServices();
   return new Promise((resolve,reject)=>{
-    googleSheetsTokenClient=google.accounts.oauth2.initTokenClient({client_id:GOOGLE_SHEETS_CLIENT_ID,scope:GOOGLE_SHEETS_WRITE_SCOPE,callback:r=>{if(r?.error)return reject(new Error(r.error_description||r.error));if(!r?.access_token)return reject(new Error('Google không trả về access token.'));resolve(r.access_token);}});
+    googleSheetsTokenClient=google.accounts.oauth2.initTokenClient({client_id:GOOGLE_SHEETS_CLIENT_ID,scope:GOOGLE_SHEETS_SCOPE,callback:r=>{if(r?.error)return reject(new Error(r.error_description||r.error));if(!r?.access_token)return reject(new Error('Google không trả về access token.'));resolve(r.access_token);}});
     googleSheetsTokenClient.requestAccessToken({prompt:'consent'});
   });
 }
 function googleSheetNameKey(v){return String(v||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/đ/gi,'d').toLowerCase().replace(/[^a-z0-9]+/g,' ').trim();}
-async function testGoogleSheetSafeWrite(){
-  const btn=document.querySelector('#outputPreviewModal .preview-google-write-test');
+function googleSheetWeekFromLine(line){
+  const text=String(line||'').replace(/\s+/g,' ').trim();
+  const m=text.match(/Hoạt\s*động\s*giáo\s*dục\s*tuần\s*((?:\d\s*){1,2})/i);
+  if(!m)return null;
+  const week=Number(m[1].replace(/\s/g,''));
+  return Number.isInteger(week)&&week>=1&&week<=35?week:null;
+}
+async function checkGoogleSheetReadOnly(){
+  const btn=document.querySelector('#outputPreviewModal .preview-google-readonly');
   const oldText=btn?.textContent;
-  let token='', testRange='', marker='', wroteMarker=false;
   try{
-    if(btn){btn.disabled=true;btn.textContent='Đang thử ghi...';}
-    token=await getGoogleSheetsWriteToken();
+    if(btn){btn.disabled=true;btn.textContent='Đang kiểm tra...';}
+    const token=await getGoogleSheetsReadOnlyToken();
     const headers={Authorization:`Bearer ${token}`};
     const metaUrl=`https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(GOOGLE_SHEETS_SPREADSHEET_ID)}?fields=properties.title,sheets.properties(sheetId,title,index)`;
     const metaRes=await fetch(metaUrl,{headers});
@@ -1055,54 +1059,118 @@ async function testGoogleSheetSafeWrite(){
     if(!metaRes.ok)throw new Error(meta?.error?.message||'Không đọc được thông tin Google Sheet.');
     const sheets=meta.sheets||[];
     const teacherKey=googleSheetNameKey(GOOGLE_SHEETS_TEACHER_NAME);
-    const teacherSheet=sheets.find(s=>googleSheetNameKey(s?.properties?.title)===teacherKey);
-    if(!teacherSheet)throw new Error(`Không tìm thấy đúng tab "${GOOGLE_SHEETS_TEACHER_NAME}". Đã dừng trước khi ghi.`);
-    const title=teacherSheet.properties.title;
-    const targetGid=Number(teacherSheet.properties.sheetId);
-    if(targetGid!==GOOGLE_SHEETS_TEACHER_GID)throw new Error(`GID tab "${title}" là ${targetGid}, không khớp GID khóa an toàn ${GOOGLE_SHEETS_TEACHER_GID}. Đã dừng trước khi ghi.`);
-    testRange=`'${String(title).replace(/'/g,"''")}'!${GOOGLE_SHEETS_SAFE_TEST_CELL}`;
-    const rangeEncoded=encodeURIComponent(testRange);
-    const valueUrl=`https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(GOOGLE_SHEETS_SPREADSHEET_ID)}/values/${rangeEncoded}`;
-    const beforeRes=await fetch(valueUrl,{headers});
-    const before=await beforeRes.json();
-    if(!beforeRes.ok)throw new Error(before?.error?.message||'Không kiểm tra được ô thử nghiệm.');
-    const beforeValue=before?.values?.[0]?.[0];
-    if(beforeValue!==undefined&&String(beforeValue)!=='')throw new Error(`Ô an toàn ${GOOGLE_SHEETS_SAFE_TEST_CELL} đang có dữ liệu. Đã dừng, không ghi đè.`);
-    marker=`TKB-GV-DAM-TEST-${Date.now()}`;
-    const writeRes=await fetch(`${valueUrl}?valueInputOption=RAW`,{method:'PUT',headers:{...headers,'Content-Type':'application/json'},body:JSON.stringify({range:testRange,majorDimension:'ROWS',values:[[marker]]})});
-    const writeJson=await writeRes.json();
-    if(!writeRes.ok)throw new Error(writeJson?.error?.message||'Google từ chối phép ghi thử.');
-    wroteMarker=true;
-    const verifyRes=await fetch(valueUrl,{headers});
-    const verify=await verifyRes.json();
-    if(!verifyRes.ok)throw new Error(verify?.error?.message||'Không đọc lại được ô vừa ghi.');
-    const verifyValue=verify?.values?.[0]?.[0];
-    if(verifyValue!==marker)throw new Error('Giá trị đọc lại không khớp giá trị vừa ghi.');
-    const clearRes=await fetch(`${valueUrl}:clear`,{method:'POST',headers:{...headers,'Content-Type':'application/json'},body:'{}'});
-    const clearJson=await clearRes.json();
-    if(!clearRes.ok)throw new Error(clearJson?.error?.message||'Đã ghi thử nhưng chưa xóa được giá trị thử nghiệm.');
-    wroteMarker=false;
-    const finalRes=await fetch(valueUrl,{headers});
-    const finalJson=await finalRes.json();
-    if(!finalRes.ok)throw new Error(finalJson?.error?.message||'Không xác minh được trạng thái sau khi xóa.');
-    const finalValue=finalJson?.values?.[0]?.[0];
-    if(finalValue!==undefined&&String(finalValue)!=='')throw new Error('Ô thử nghiệm chưa trở về trạng thái trống sau khi xóa.');
-    alert(`THỬ QUYỀN GHI GOOGLE SHEETS THÀNH CÔNG – 5.1.2B\n\nTệp: ${meta.properties?.title||GOOGLE_SHEETS_SPREADSHEET_ID}\nTab khóa an toàn: ${title}\nGID: ${targetGid}\nÔ thử nghiệm: ${GOOGLE_SHEETS_SAFE_TEST_CELL}\n\nĐã thực hiện: kiểm tra ô trống → ghi giá trị thử → đọc lại đúng → xóa giá trị thử → xác minh ô trống.\n\nCHƯA có lệnh xuất kế hoạch tuần thật.`);
-  }catch(err){
-    if(wroteMarker&&token&&testRange){
-      try{const headers={Authorization:`Bearer ${token}`,'Content-Type':'application/json'};const valueUrl=`https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(GOOGLE_SHEETS_SPREADSHEET_ID)}/values/${encodeURIComponent(testRange)}`;await fetch(`${valueUrl}:clear`,{method:'POST',headers,body:'{}'});}catch(_cleanupErr){}
+    const teacherSheet=sheets.find(s=>googleSheetNameKey(s?.properties?.title)===teacherKey)||sheets.find(s=>googleSheetNameKey(s?.properties?.title).includes(teacherKey));
+    const linkSheet=sheets.find(s=>Number(s?.properties?.sheetId)===GOOGLE_SHEETS_LINK_GID);
+    if(!teacherSheet){
+      const names=sheets.map(s=>s?.properties?.title).filter(Boolean).join(', ');
+      throw new Error(`Chưa tìm thấy tab mang tên "${GOOGLE_SHEETS_TEACHER_NAME}".\n\nTab gid=${GOOGLE_SHEETS_LINK_GID} hiện là: ${linkSheet?.properties?.title||'không tìm thấy'}.\n\nCác tab đọc được: ${names}`);
     }
-    console.error('Google Sheets safe write test:',err);alert(`THỬ QUYỀN GHI CHƯA THÀNH CÔNG\n\n${err?.message||err}\n\nKhông có lệnh xuất kế hoạch tuần thật.`);
-  }finally{if(btn){btn.disabled=false;btn.textContent=oldText||'Thử quyền ghi Google Sheet';}}
+    const title=teacherSheet.properties.title;
+    const targetGid=teacherSheet.properties.sheetId;
+    const range=`'${String(title).replace(/'/g,"''")}'!A:K`;
+    const valuesUrl=`https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(GOOGLE_SHEETS_SPREADSHEET_ID)}/values/${encodeURIComponent(range)}?majorDimension=ROWS`;
+    const valuesRes=await fetch(valuesUrl,{headers});
+    const valuesJson=await valuesRes.json();
+    if(!valuesRes.ok)throw new Error(valuesJson?.error?.message||'Không đọc được dữ liệu của sheet giáo viên.');
+    const rows=valuesJson.values||[];
+    const weeks=[];
+    rows.forEach((row,i)=>{const week=googleSheetWeekFromLine((row||[]).join(' '));if(week!==null)weeks.push({week,row:i+1});});
+    const uniqueWeeks=[];const seen=new Set();
+    weeks.forEach(x=>{if(!seen.has(x.week)){seen.add(x.week);uniqueWeeks.push(x);}});
+    uniqueWeeks.sort((a,b)=>a.week-b.week);
+    const weekText=uniqueWeeks.length?uniqueWeeks.map(x=>`Tuần ${x.week} (dòng ${x.row})`).join(', '):'chưa nhận diện được tiêu đề tuần 1–35 trong cột A:K';
+    const missing=Array.from({length:35},(_,i)=>i+1).filter(w=>!seen.has(w));
+    alert(`KẾT NỐI GOOGLE SHEETS CHỈ ĐỌC THÀNH CÔNG – O-R1\n\nTệp: ${meta.properties?.title||GOOGLE_SHEETS_SPREADSHEET_ID}\nTab giáo viên: ${title}\nGID thực tế: ${targetGid}\nTab của link gid=${GOOGLE_SHEETS_LINK_GID}: ${linkSheet?.properties?.title||'không tìm thấy'}\nSố dòng đã đọc: ${rows.length}\n\nNhận diện tuần: ${weekText}\n\nTuần chưa thấy: ${missing.length?missing.join(', '):'Không có – đã thấy đủ Tuần 1–35'}\n\nBước này vẫn chỉ đọc; app chưa có quyền và chưa có lệnh ghi/sửa/xóa Google Sheet.`);
+  }catch(err){console.error('Google Sheets read-only check:',err);alert(`Chưa xác định được đúng Google Sheet của giáo viên.\n\n${err?.message||err}`);}
+  finally{if(btn){btn.disabled=false;btn.textContent=oldText||'Kiểm tra Google Sheet O-R1';}}
 }
-function ensureGoogleSheetsWriteTestPreviewButton(){
+function ensureGoogleSheetsReadOnlyPreviewButton(){
   const bar=document.querySelector('#outputPreviewModal .output-preview-bar>div');
-  if(!bar||bar.querySelector('.preview-google-write-test'))return;
+  if(!bar||bar.querySelector('.preview-google-readonly'))return;
   const close=bar.querySelector('.preview-close');
-  const b=document.createElement('button');b.type='button';b.className='preview-google-write-test';b.textContent='Thử quyền ghi Google Sheet';b.title='BƯỚC 5.1.2B – chỉ thử ghi/đọc/xóa tại ô trống Z1000 của đúng tab Võ Thanh Đậm; chưa xuất kế hoạch thật';b.onclick=testGoogleSheetSafeWrite;
+  const b=document.createElement('button');b.type='button';b.className='preview-google-readonly';b.textContent='Kiểm tra Google Sheet O-R1';b.title='BƯỚC 5.1.1O-R1 – chỉ đọc; tự tìm tab Võ Thanh Đậm và tuần 1–35';b.onclick=checkGoogleSheetReadOnly;
   bar.insertBefore(b,close||null);
 }
-const openOutputPreviewBeforeGoogleWriteTest=openOutputPreview;
-openOutputPreview=function(){openOutputPreviewBeforeGoogleWriteTest();ensureGoogleSheetsWriteTestPreviewButton();};
-const previewBtnGoogleWriteTest=document.getElementById('previewBtn');
-if(previewBtnGoogleWriteTest)previewBtnGoogleWriteTest.onclick=openOutputPreview;
+const openOutputPreviewBeforeGoogleReadOnly=openOutputPreview;
+openOutputPreview=function(){openOutputPreviewBeforeGoogleReadOnly();ensureGoogleSheetsReadOnlyPreviewButton();};
+const previewBtnGoogleReadOnly=document.getElementById('previewBtn');
+if(previewBtnGoogleReadOnly)previewBtnGoogleReadOnly.onclick=openOutputPreview;
+
+
+// BƯỚC 5.1.3A - GHI THẬT RIÊNG TUẦN 4 VÀO TAB VÕ THANH ĐẬM.
+// Chỉ ghi khi: đúng Spreadsheet, đúng tab/GID, đang chọn Tuần 4, Google Sheet chưa có Tuần 4.
+const GOOGLE_SHEETS_TEACHER_GID=1908030276;
+function gsA1Title(title){return `'${String(title).replace(/'/g,"''")}'`;}
+async function gsJson(url,options={}){
+  const res=await fetch(url,options); let body={}; try{body=await res.json()}catch(e){}
+  if(!res.ok)throw new Error(body?.error?.message||`Google Sheets API lỗi ${res.status}`); return body;
+}
+function gsWeek4Rows(data){
+  const wd=selectedWeekDates();
+  const days=['Hai','Ba','Tư','Năm','Sáu'], labels=['Thứ hai','Thứ ba','Thứ tư','Thứ năm','Thứ sáu'];
+  const cell=(day,session,tiet)=>excelLessonCellFormal(data,day,session,tiet);
+  const subjects=[...new Set(data.map(x=>normalizeSubjectForPlan(x.monHoc)).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'vi'));
+  const concurrent=getConcurrentPeriods();
+  const details=subjects.map(sub=>[sub,data.filter(x=>normalizeSubjectForPlan(x.monHoc)===sub).length]);
+  if(concurrent>0)details.push(['Kiêm nhiệm',concurrent]);
+  while(details.length<4)details.push(['','']);
+  if(details.length>4)throw new Error('Bảng tổng hợp Tuần 4 có hơn 4 dòng. Chưa ghi để tránh làm lệch mẫu Google Sheet của nhà trường.');
+  const values=[];
+  values.push({range:'A74',values:[[`Hoạt động giáo dục tuần 04`]]});
+  values.push({range:'A75',values:[[`Năm học 2026 – 2027. ${formalSubjectGradeText(data)}, Trường TH – THCS & THPT Lại Sơn`]]});
+  values.push({range:'A76',values:[[`Tuần 4: từ ngày ${wd.fmt(wd.start)} đến ${wd.fmt(wd.end)}`]]});
+  values.push({range:'A78',values:[['Thời gian']]});
+  values.push({range:'C78:G78',values:[[...wd.days.map((d,i)=>`Ngày ${d}\n${labels[i]}`)]]});
+  values.push({range:'A79:H79',values:[['Buổi','Tiết',...labels,'Nội dung điều chỉnh']]});
+  const schedule=[];
+  for(let t=1;t<=4;t++)schedule.push([t,...days.map(day=>cell(day,'Sáng',t))]);
+  for(let t=1;t<=3;t++)schedule.push([t,...days.map(day=>cell(day,'Chiều',t))]);
+  values.push({range:'B80:G86',values:schedule});
+  values.push({range:'A80',values:[['Sáng']]}); values.push({range:'A84',values:[['Chiều']]});
+  values.push({range:'A87',values:[[`Tổng số: ${data.length} tiết`]]});
+  values.push({range:'A89',values:[['TỔNG HỢP']]});
+  values.push({range:'A90:H90',values:[['STT','Nội dung','','','Số lượng tiết học','','Ghi chú','']]});
+  details.slice(0,4).forEach((x,i)=>values.push({range:`A${91+i}:H${91+i}`,values:[[i+1,x[0],'','',x[1],'','','']]}));
+  values.push({range:'B95',values:[['Tổng số']]}); values.push({range:'E95',values:[[data.length+concurrent]]});
+  return values;
+}
+async function exportWeek4ToGoogleSheet(){
+  const btn=document.querySelector('#outputPreviewModal .preview-google-write-week4'), old=btn?.textContent;
+  try{
+    if(Number($('weekSelect')?.value)!==4)throw new Error('BƯỚC 5.1.3A chỉ cho phép ghi Tuần 4. Hãy chọn Tuần 4 trước.');
+    const data=outputScheduleData(); if(!data.length)throw new Error('Tuần 4 hiện không có dữ liệu để ghi.');
+    if(btn){btn.disabled=true;btn.textContent='Đang kiểm tra...';}
+    const token=await getGoogleSheetsReadOnlyToken(), headers={Authorization:`Bearer ${token}`,'Content-Type':'application/json'};
+    const base=`https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(GOOGLE_SHEETS_SPREADSHEET_ID)}`;
+    const meta=await gsJson(`${base}?fields=properties.title,sheets.properties(sheetId,title,gridProperties)`,{headers});
+    const teacher=(meta.sheets||[]).find(s=>Number(s?.properties?.sheetId)===GOOGLE_SHEETS_TEACHER_GID);
+    if(!teacher||googleSheetNameKey(teacher.properties.title)!==googleSheetNameKey(GOOGLE_SHEETS_TEACHER_NAME))throw new Error(`DỪNG GHI: không khớp tab ${GOOGLE_SHEETS_TEACHER_NAME} / GID ${GOOGLE_SHEETS_TEACHER_GID}.`);
+    const title=teacher.properties.title, q=gsA1Title(title);
+    const scan=await gsJson(`${base}/values/${encodeURIComponent(q+'!A1:H824')}?majorDimension=ROWS`,{headers});
+    const found=[];(scan.values||[]).forEach((r,i)=>{const w=googleSheetWeekFromLine((r||[]).join(' '));if(w!==null)found.push({week:w,row:i+1});});
+    if(found.some(x=>x.week===4))throw new Error(`Google Sheet đã có Tuần 4 ở dòng ${found.find(x=>x.week===4).row}. App không ghi chồng.`);
+    const w3=found.find(x=>x.week===3); if(!w3||w3.row!==51)throw new Error(`DỪNG GHI: vị trí Tuần 3 không còn đúng mẫu (mong đợi dòng 51, thực tế ${w3?.row||'không tìm thấy'}).`);
+    if(!confirm('GHI THẬT TUẦN 4 vào tab Võ Thanh Đậm?\n\nTuần 1–3 sẽ không bị sửa. App sẽ tạo Tuần 4 tại dòng 74–95 theo mẫu Tuần 3.'))return;
+    if(btn)btn.textContent='Đang tạo mẫu Tuần 4...';
+    // Sao chép toàn bộ mẫu Tuần 3 (51–72) sang Tuần 4 (74–95), rồi chỉ thay nội dung.
+    await gsJson(`${base}:batchUpdate`,{method:'POST',headers,body:JSON.stringify({requests:[
+      {copyPaste:{source:{sheetId:GOOGLE_SHEETS_TEACHER_GID,startRowIndex:50,endRowIndex:72,startColumnIndex:0,endColumnIndex:8},destination:{sheetId:GOOGLE_SHEETS_TEACHER_GID,startRowIndex:73,endRowIndex:95,startColumnIndex:0,endColumnIndex:8},pasteType:'PASTE_NORMAL',pasteOrientation:'NORMAL'}}
+    ]})});
+    await gsJson(`${base}/values/${encodeURIComponent(q+'!A74:H95')}:clear`,{method:'POST',headers,body:'{}'});
+    if(btn)btn.textContent='Đang ghi Tuần 4...';
+    const payload=gsWeek4Rows(data).map(x=>({range:`${q}!${x.range}`,majorDimension:'ROWS',values:x.values}));
+    await gsJson(`${base}/values:batchUpdate`,{method:'POST',headers,body:JSON.stringify({valueInputOption:'USER_ENTERED',data:payload})});
+    const verify=await gsJson(`${base}/values/${encodeURIComponent(q+'!A74:H95')}?majorDimension=ROWS`,{headers});
+    const rows=verify.values||[], detected=[]; rows.forEach((r,i)=>{const w=googleSheetWeekFromLine((r||[]).join(' '));if(w!==null)detected.push({week:w,row:74+i});});
+    if(!detected.some(x=>x.week===4))throw new Error('Đã gửi lệnh ghi nhưng chưa đọc lại được tiêu đề Tuần 4. Hãy kiểm tra Google Sheet trước khi thao tác tiếp.');
+    alert(`GHI TUẦN 4 THÀNH CÔNG\n\nTệp: ${meta.properties?.title||''}\nTab: ${title}\nGID: ${GOOGLE_SHEETS_TEACHER_GID}\nVùng ghi: dòng 74–95\nSố tiết: ${data.length}\nTổng kể cả kiêm nhiệm: ${data.length+getConcurrentPeriods()}\n\nTuần 1–3 không bị sửa. Hãy mở Google Sheet kiểm tra trực tiếp trước khi làm Tuần 5.`);
+  }catch(err){console.error('[TKB] Ghi thật Tuần 4:',err);alert(`CHƯA GHI ĐƯỢC TUẦN 4\n\n${err?.message||err}\n\nKhông tiếp tục Tuần 5 cho đến khi Tuần 4 được kiểm tra.`)}
+  finally{if(btn){btn.disabled=false;btn.textContent=old||'Ghi Tuần 4 vào Google Sheet';}}
+}
+function ensureGoogleSheetsWeek4WriteButton(){
+  const bar=document.querySelector('#outputPreviewModal .output-preview-bar>div'); if(!bar||bar.querySelector('.preview-google-write-week4'))return;
+  const close=bar.querySelector('.preview-close'); const b=document.createElement('button'); b.type='button';b.className='preview-google-write-week4';b.textContent='Ghi Tuần 4 vào Google Sheet';b.title='BƯỚC 5.1.3A – chỉ ghi thật Tuần 4 vào tab Võ Thanh Đậm';b.onclick=exportWeek4ToGoogleSheet;bar.insertBefore(b,close||null);
+}
+const openOutputPreviewBeforeWeek4Write=openOutputPreview;
+openOutputPreview=function(){openOutputPreviewBeforeWeek4Write();ensureGoogleSheetsWeek4WriteButton();};
+const previewBtnWeek4Write=document.getElementById('previewBtn'); if(previewBtnWeek4Write)previewBtnWeek4Write.onclick=openOutputPreview;
