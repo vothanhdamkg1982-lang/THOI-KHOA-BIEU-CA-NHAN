@@ -1575,7 +1575,7 @@ async function exportSelectedWeek1To35ToGoogleSheet(){
       });
       const concurrent=getConcurrentPeriods();
       weekRows.push(
-        {range:'B18',values:[[\`Tổng số: ${data.length} tiết\`]]},
+        {range:'B18',values:[[`Tổng số: ${data.length} tiết`]]},
         {range:'B19',values:[['TỔNG HỢP']]},
         {range:'B20:H20',values:[['TT','Nội dung','','Số lượng tiết học','Ghi chú','','']]},
         {range:'B21:H24',values:[
