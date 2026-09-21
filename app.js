@@ -922,6 +922,7 @@ function ensureFormalOutputStyles(){
     .formal-grid thead th{padding:.7mm .6mm;line-height:1.05}
     .formal-lesson{font-size:12pt;line-height:1.08;text-align:left}.formal-lesson b{font-size:12pt}.formal-lesson+hr{border:0;border-top:.3px solid #777;margin:.5mm 0}
     .formal-output h3{text-align:center;font-size:12pt;margin:1.5mm 0 .7mm}.formal-summary{width:82%;margin:0 auto}.formal-summary th,.formal-summary td{padding:.55mm 1mm;line-height:1.05}
+    .formal-summary-total th,.formal-summary-total td{font-weight:700!important}
     .formal-date{text-align:right;font-style:italic;margin:1.5mm 4mm .5mm 0}.formal-sign{display:grid;grid-template-columns:1fr 1fr 1fr;text-align:center;gap:8mm;margin-top:.5mm;min-height:20mm}
     @media print{
       @page{size:A4 landscape;margin:5mm}
