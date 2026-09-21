@@ -1370,14 +1370,16 @@ openOutputPreview=function(){openOutputPreviewBeforeWeek5Write();ensureGoogleShe
 const previewBtnWeek5Write=document.getElementById('previewBtn');if(previewBtnWeek5Write)previewBtnWeek5Write.onclick=openOutputPreview;
 
 // BƯỚC 5.1.5 - Ghi Google Sheet tổng quát cho Tuần 6–35.
-// Mỗi tuần chiếm 22 dòng. Dùng tuần liền trước đã có trên Google Sheet làm mẫu định dạng,
-// còn dữ liệu Môn + Lớp + Tên bài lấy trực tiếp từ Xem trước của tuần đang chọn.
+// Mỗi tuần chiếm 22 dòng. BƯỚC 5.1.6: dùng tuần chuẩn gần nhất đã tồn tại
+// trên Google Sheet làm mẫu định dạng; không bắt buộc phải có tuần liền trước.
+// Dữ liệu Môn + Lớp + Tên bài vẫn lấy trực tiếp từ Xem trước của tuần đang chọn.
 async function exportSelectedWeek6To35ToGoogleSheet(){
   const week=Number($('weekSelect')?.value||0);
   const btn=document.querySelector('#outputPreviewModal .preview-google-write-week6-35'),old=btn?.textContent;
   try{
     if(!Number.isInteger(week)||week<6||week>35)throw new Error('BƯỚC 5.1.5 chỉ ghi Tuần 6–35. Hãy chọn tuần cần ghi trước.');
-    const startRow=74+(week-4)*22,endRow=startRow+21,templateStart=startRow-22,templateEnd=startRow-1,offset=22;
+    const startRow=74+(week-4)*22,endRow=startRow+21;
+    let templateWeek=0,templateStart=0,templateEnd=0,offset=0;
     const data=outputScheduleData().map(x=>({...x}));
     if(data.length!==20)throw new Error(`DỪNG GHI: TKB nguồn Tuần ${week} phải có đúng 20 tiết, hiện đọc được ${data.length} tiết.`);
     const slotMap=new Map();
@@ -1394,9 +1396,12 @@ async function exportSelectedWeek6To35ToGoogleSheet(){
     if(maxRows<endRow)throw new Error(`Google Sheet chỉ có ${maxRows} dòng, chưa đủ để tạo Tuần ${week} đến dòng ${endRow}.`);
     const scan=await gsJson(`${base}/values/${encodeURIComponent(q+`!A1:H${maxRows}`)}?majorDimension=ROWS`,{headers}),found=[];(scan.values||[]).forEach((r,i)=>{const w=googleSheetWeekFromLine((r||[]).join(' '));if(w!==null)found.push({week:w,row:i+1});});
     if(found.some(x=>x.week===week))throw new Error(`Google Sheet đã có Tuần ${week} ở dòng ${found.find(x=>x.week===week).row}. App không ghi chồng.`);
-    const prev=found.find(x=>x.week===week-1);if(!prev||prev.row!==templateStart)throw new Error(`DỪNG GHI: phải có Tuần ${week-1} đúng ở dòng ${templateStart} để làm mẫu. Hiện ${prev?.row?`ở dòng ${prev.row}`:'chưa tìm thấy'}.`);
-    if(!confirm(`GHI THẬT TUẦN ${week} vào tab Võ Thanh Đậm?\n\nTuần 1–${week-1} sẽ không bị sửa. App sao chép nguyên mẫu Tuần ${week-1} rồi thay bằng dữ liệu Xem trước Tuần ${week}.`))return;
-    if(btn)btn.textContent=`Đang tạo mẫu Tuần ${week}...`;
+    const candidates=found.filter(x=>x.week>=4&&x.week<week&&x.row===74+(x.week-4)*22).sort((a,b)=>b.week-a.week);
+    const template=candidates[0];
+    if(!template)throw new Error(`DỪNG GHI: chưa tìm thấy tuần chuẩn nào từ Tuần 4 đến Tuần ${week-1} để làm mẫu định dạng.`);
+    templateWeek=template.week;templateStart=template.row;templateEnd=templateStart+21;offset=startRow-templateStart;
+    if(!confirm(`GHI THẬT TUẦN ${week} vào tab Võ Thanh Đậm?\n\nApp sẽ dùng Tuần ${templateWeek} (dòng ${templateStart}–${templateEnd}) làm mẫu định dạng và tạo Tuần ${week} tại dòng ${startRow}–${endRow}.\nCác tuần đã có sẽ không bị sửa.`))return;
+    if(btn)btn.textContent=`Đang lấy mẫu Tuần ${templateWeek}...`;
     const tpl=await gsJson(`${base}?ranges=${encodeURIComponent(title+`!A${templateStart}:H${templateEnd}`)}&includeGridData=true&fields=sheets(merges,data(rowMetadata(pixelSize)))`,{headers});
     const s0=templateStart-1,s1=templateEnd,d0=startRow-1,d1=endRow;
     const srcMerges=(tpl.sheets?.[0]?.merges||[]).filter(m=>m.startRowIndex>=s0&&m.endRowIndex<=s1&&m.startColumnIndex>=0&&m.endColumnIndex<=8),srcRowMeta=tpl.sheets?.[0]?.data?.[0]?.rowMetadata||[];
@@ -1422,7 +1427,7 @@ function ensureGoogleSheetsWeek6To35WriteButton(){
   let b=bar.querySelector('.preview-google-write-week6-35');
   if(week<6||week>35){if(b)b.remove();return;}
   if(!b){const close=bar.querySelector('.preview-close');b=document.createElement('button');b.type='button';b.className='preview-google-write-week6-35';b.onclick=exportSelectedWeek6To35ToGoogleSheet;bar.insertBefore(b,close||null);}
-  b.textContent=`Ghi Tuần ${week} vào Google Sheet`;b.title=`BƯỚC 5.1.5 – ghi Tuần ${week} bằng cơ chế tổng quát, dùng Tuần ${week-1} đã kiểm tra làm mẫu`;
+  b.textContent=`Ghi Tuần ${week} vào Google Sheet`;b.title=`BƯỚC 5.1.6 – ghi Tuần ${week} bằng cơ chế tổng quát, dùng tuần chuẩn gần nhất đã tồn tại làm mẫu`;
 }
 const openOutputPreviewBeforeWeek6To35Write=openOutputPreview;
 openOutputPreview=function(){openOutputPreviewBeforeWeek6To35Write();ensureGoogleSheetsWeek6To35WriteButton();};
