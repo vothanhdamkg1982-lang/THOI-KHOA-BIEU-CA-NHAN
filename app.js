@@ -1521,6 +1521,23 @@ async function exportSelectedWeek1To35ToGoogleSheet(){
     requests.push({repeatCell:{range:{sheetId:GOOGLE_SHEETS_TEACHER_GID,startRowIndex:scheduleStartIndex,endRowIndex:scheduleEndIndex,startColumnIndex:2,endColumnIndex:7},cell:{userEnteredFormat:{wrapStrategy:'WRAP'}},fields:'userEnteredFormat.wrapStrategy'}});
     requests.push({autoResizeDimensions:{dimensions:{sheetId:GOOGLE_SHEETS_TEACHER_GID,dimension:'ROWS',startIndex:scheduleStartIndex,endIndex:scheduleEndIndex}}});
     await gsJson(`${base}:batchUpdate`,{method:'POST',headers,body:JSON.stringify({requests})});
+    if(specialWeek1){
+      // BƯỚC 5.2.8: dựng đúng khối cuối Tuần 1 như Xem trước.
+      const sumReq=[
+        {unmergeCells:{range:{sheetId:GOOGLE_SHEETS_TEACHER_GID,startRowIndex:17,endRowIndex:25,startColumnIndex:1,endColumnIndex:8}}},
+        {mergeCells:{range:{sheetId:GOOGLE_SHEETS_TEACHER_GID,startRowIndex:17,endRowIndex:18,startColumnIndex:1,endColumnIndex:8},mergeType:'MERGE_ALL'}},
+        {mergeCells:{range:{sheetId:GOOGLE_SHEETS_TEACHER_GID,startRowIndex:18,endRowIndex:19,startColumnIndex:1,endColumnIndex:8},mergeType:'MERGE_ALL'}}
+      ];
+      for(let rr=19;rr<25;rr++){
+        sumReq.push({mergeCells:{range:{sheetId:GOOGLE_SHEETS_TEACHER_GID,startRowIndex:rr,endRowIndex:rr+1,startColumnIndex:2,endColumnIndex:4},mergeType:'MERGE_ALL'}});
+        sumReq.push({mergeCells:{range:{sheetId:GOOGLE_SHEETS_TEACHER_GID,startRowIndex:rr,endRowIndex:rr+1,startColumnIndex:5,endColumnIndex:8},mergeType:'MERGE_ALL'}});
+      }
+      sumReq.push({repeatCell:{range:{sheetId:GOOGLE_SHEETS_TEACHER_GID,startRowIndex:17,endRowIndex:25,startColumnIndex:1,endColumnIndex:8},cell:{userEnteredFormat:{horizontalAlignment:'CENTER',verticalAlignment:'MIDDLE',wrapStrategy:'WRAP',textFormat:{fontFamily:'Times New Roman',fontSize:12}}},fields:'userEnteredFormat(horizontalAlignment,verticalAlignment,wrapStrategy,textFormat)'}});
+      sumReq.push({repeatCell:{range:{sheetId:GOOGLE_SHEETS_TEACHER_GID,startRowIndex:19,endRowIndex:25,startColumnIndex:1,endColumnIndex:8},cell:{userEnteredFormat:{borders:{top:{style:'SOLID'},bottom:{style:'SOLID'},left:{style:'SOLID'},right:{style:'SOLID'}}}},fields:'userEnteredFormat.borders'}});
+      sumReq.push({repeatCell:{range:{sheetId:GOOGLE_SHEETS_TEACHER_GID,startRowIndex:17,endRowIndex:20,startColumnIndex:1,endColumnIndex:8},cell:{userEnteredFormat:{textFormat:{bold:true,fontFamily:'Times New Roman',fontSize:12}}},fields:'userEnteredFormat.textFormat'}});
+      sumReq.push({repeatCell:{range:{sheetId:GOOGLE_SHEETS_TEACHER_GID,startRowIndex:24,endRowIndex:25,startColumnIndex:1,endColumnIndex:8},cell:{userEnteredFormat:{textFormat:{bold:true,fontFamily:'Times New Roman',fontSize:12}}},fields:'userEnteredFormat.textFormat'}});
+      await gsJson(`${base}:batchUpdate`,{method:'POST',headers,body:JSON.stringify({requests:sumReq})});
+    }
     // Tuần 1: giữ nguyên PHỤ LỤC 1.4 ở hàng 4 và ghi lại đúng 3 dòng tiêu đề hàng 5–7;
     // chỉ làm sạch bảng hàng 8–26. Tuần 2–35 giữ nguyên vùng 22 dòng.
     await gsJson(`${base}/values/${encodeURIComponent(q+`!A${specialWeek1?8:startRow}:H${specialWeek1?26:endRow}`)}:clear`,{method:'POST',headers,body:'{}'});
@@ -1540,10 +1557,34 @@ async function exportSelectedWeek1To35ToGoogleSheet(){
         if(row>=startRow+3)return {...x,range:String(x.range).replace(/(\d+)/g,n=>String(Number(n)-3))};
         return null;
       }).filter(Boolean);
-      // Hàng 5 và 7 đã có tiêu đề căn giữa từ mẫu chuẩn; không ghi A5/A7 vì sẽ tạo chữ thừa ở mép trái.
-      // Chỉ cập nhật dòng năm học/môn tại đúng vùng tiêu đề chính.
+      // BƯỚC 5.2.8: Tuần 1 có phần cuối riêng. Chỉ giữ dữ liệu lịch ở hàng 8–16;
+      // phần Tổng số/TỔNG HỢP sẽ dựng chuẩn riêng ở hàng 18–25 bên dưới.
+      weekRows=weekRows.filter(x=>{
+        const m=String(x.range).match(/^[A-Z]+(\d+)/);
+        return !m || Number(m[1])<18;
+      });
       weekRows.unshift(
         {range:'B6',values:[['Năm học 2026 – 2027. Môn: Tin học, Công nghệ, Đạo đức – Khối: 3, 4, 5 – Trường TH – THCS & THPT Lại Sơn']]}
+      );
+      const counts={'Công nghệ':0,'Tin học':0,'Đạo đức':0};
+      data.forEach(x=>{
+        const k=normKey(normalizeSubjectForPlan(x?.monHoc||x?.plan?.subject||'')).replace(/[^a-z0-9]+/g,'');
+        if(k.includes('congnghe')||k==='cn'||k==='cnghe')counts['Công nghệ']++;
+        else if(k.includes('tinhoc')||k==='th')counts['Tin học']++;
+        else if(k.includes('daoduc')||k==='dd')counts['Đạo đức']++;
+      });
+      const concurrent=getConcurrentPeriods();
+      weekRows.push(
+        {range:'B18',values:[[\`Tổng số: ${data.length} tiết\`]]},
+        {range:'B19',values:[['TỔNG HỢP']]},
+        {range:'B20:H20',values:[['TT','Nội dung','','Số lượng tiết học','Ghi chú','','']]},
+        {range:'B21:H24',values:[
+          [1,'Tin học','',counts['Tin học'],'','',''],
+          [2,'Công nghệ','',counts['Công nghệ'],'','',''],
+          [3,'Kiêm nhiệm','',concurrent,'','',''],
+          [4,'Đạo đức','',counts['Đạo đức'],'','','']
+        ]},
+        {range:'B25:H25',values:[['','Tổng số','',data.length+concurrent,'','','']]}
       );
     }
     const payload=weekRows.map(x=>({range:`${q}!${x.range}`,majorDimension:'ROWS',values:x.values}));await gsJson(`${base}/values:batchUpdate`,{method:'POST',headers,body:JSON.stringify({valueInputOption:'USER_ENTERED',data:payload})});
