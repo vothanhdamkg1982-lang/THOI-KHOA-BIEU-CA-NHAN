@@ -1,6 +1,6 @@
 'use strict';
 const TEACHER='Đậm';
-// BƯỚC 3 - Kết nối Supabase. Chưa thay cơ chế localStorage ở bước này.
+// BƯỚC 3.3 - Kho TKB + Phụ lục 2 + Lịch năm học: Supabase là nguồn dữ liệu chính; cache cục bộ được tách theo tài khoản.
 const SUPABASE_URL='https://ohmwphdeeldmlxuuknny.supabase.co';
 const SUPABASE_PUBLISHABLE_KEY='sb_publishable_DgxnOXel9t7woqYrfInl5Q_YogcW--c';
 let supabaseClient=null;
@@ -31,6 +31,17 @@ async function saveTimetableVersionToSupabase(version){
   const rows=(version.lessons||[]).map(x=>lessonToSupabaseRow(x,data.id));
   if(rows.length){const {error:lessonError}=await supabaseClient.from('tkb_timetable_lessons').insert(rows);if(lessonError){await supabaseClient.from('tkb_timetable_versions').delete().eq('id',data.id);throw lessonError;}}
   version.supabaseId=data.id;version.syncedToSupabase=true;return data.id;
+}
+async function updateTimetableEffectiveWeekSupabase(version){
+  if(!currentAuthUser)throw new Error('Hãy đăng nhập giáo viên trước khi thay đổi hiệu lực TKB.');
+  if(!version?.supabaseId)throw new Error('Phiên bản TKB này chưa có mã Supabase. Hãy đăng nhập lại để tải Kho TKB từ Supabase.');
+  const week=schoolCalendar.weeks.find(w=>Number(w.week)===Number(version.startWeek));
+  const {error}=await supabaseClient.from('tkb_timetable_versions')
+    .update({effective_week:Number(version.startWeek),effective_date:week?.start||null})
+    .eq('id',version.supabaseId).eq('user_id',currentAuthUser.id);
+  if(error)throw error;
+  version.effectiveDate=week?.start||null;
+  version.syncedToSupabase=true;
 }
 
 function canonicalAppendix2Records(){
@@ -73,7 +84,15 @@ async function restoreAppendix2FromSupabase(){
     .order('created_at',{ascending:false}).limit(1);
   if(vErr)throw vErr;
   const version=versions?.[0];
-  if(!version)return {versions:0,lessons:0,subjects:0};
+  if(!version){
+    // Đã đăng nhập thì Supabase là nguồn chính: tài khoản không có Phụ lục 2 phải hiển thị kho trống,
+    // không được giữ dữ liệu Phụ lục 2 đã đọc/khôi phục từ tài khoản hoặc phiên trước.
+    lessonPlanMap.clear(); planSubjectCatalog.clear();
+    lessonPlanMeta={file:'',type:'',count:0};
+    const info=$('pl2Info'); if(info)info.textContent='Chưa có Phụ lục 2 trong kho Supabase của tài khoản này.';
+    applyLessonPlan(); render();
+    return {versions:0,lessons:0,subjects:0};
+  }
   const {data:rows,error:lErr}=await supabaseClient.from('tkb_appendix2_lessons')
     .select('subject_name,grade,week_number,lesson_number,lesson_title,duration_text')
     .eq('user_id',currentAuthUser.id).eq('appendix2_version_id',version.id)
@@ -159,7 +178,15 @@ async function restoreScheduleRepositoryFromSupabase(){
   const schoolYearId=await ensureSupabaseSchoolYear();
   const {data:versions,error:vErr}=await supabaseClient.from('tkb_timetable_versions').select('id,source_filename,effective_week,effective_date,content_hash,lesson_count,created_at').eq('user_id',currentAuthUser.id).eq('school_year_id',schoolYearId).order('effective_week',{ascending:true}).order('created_at',{ascending:true});
   if(vErr)throw vErr;
-  if(!versions?.length)return {versions:0,lessons:0};
+  if(!versions?.length){
+    // Khi đã đăng nhập, Supabase là nguồn chính. Tài khoản không có TKB thì phải hiển thị kho trống,
+    // không được giữ/khôi phục dữ liệu localStorage của máy hoặc tài khoản trước.
+    scheduleVersions.splice(0,scheduleVersions.length);
+    saveScheduleRepository();
+    activateSelectedWeek();
+    const status=$('supabaseStatus'); if(status)status.textContent='☁️ Supabase: ĐÃ KẾT NỐI • Đã đăng nhập • Kho TKB đang trống';
+    return {versions:0,lessons:0};
+  }
   const ids=versions.map(v=>v.id);
   const {data:rows,error:lErr}=await supabaseClient.from('tkb_timetable_lessons').select('*').eq('user_id',currentAuthUser.id).in('timetable_version_id',ids).order('created_at',{ascending:true});
   if(lErr)throw lErr;
@@ -180,6 +207,8 @@ async function restoreAfterLogin(showMessage=false){
     const calendarResult=await restoreSchoolCalendarFromSupabase();
     const r=await restoreScheduleRepositoryFromSupabase();
     const appendix2Result=await restoreAppendix2FromSupabase();
+    restoreOutputSettings();
+    activateSelectedWeek();
     if(showMessage){
       const parts=[];
       if(calendarResult.weeks)parts.push(`Lịch năm học ${calendarResult.weeks} tuần`);
@@ -215,6 +244,17 @@ async function logoutTeacher(){
   const {error}=await supabaseClient.auth.signOut();
   if(error){alert('Không đăng xuất được: '+error.message);return;}
   updateAuthUI(null);
+  // Không để TKB của tài khoản vừa đăng xuất còn hiển thị cho người dùng kế tiếp.
+  scheduleVersions.splice(0,scheduleVersions.length);
+  allLessons=[];meta={file:'',sheets:[],counts:{},errors:[]};
+  // Không để Phụ lục 2 của tài khoản vừa đăng xuất còn hiển thị cho giáo viên kế tiếp.
+  lessonPlanMap.clear(); planSubjectCatalog.clear();
+  lessonPlanMeta={file:'',type:'',count:0};
+  const pl2Info=$('pl2Info'); if(pl2Info)pl2Info.textContent='Chưa có Phụ lục 2 trong kho.';
+  resetSchoolCalendar();
+  if($('weekSelect'))$('weekSelect').value='1';
+  if($('concurrentPeriods'))$('concurrentPeriods').value='0';
+  activateSelectedWeek();
 }
 async function initSupabaseConnection(){
   const status=$('supabaseStatus');
@@ -251,8 +291,10 @@ function fmtDateVN(v){const d=typeof v==='string'?parseLocalDate(v):v;return `${
 function normalizeBreaks(arr){return (arr||[]).filter(x=>x&&x.start&&x.end&&x.start<=x.end).sort((a,b)=>a.start.localeCompare(b.start))}
 function weekHitsBreak(start,breaks){const end=new Date(start);end.setDate(end.getDate()+4);return breaks.some(b=>{const bs=parseLocalDate(b.start),be=parseLocalDate(b.end);return start<=be&&end>=bs})}
 function generateSchoolWeeks(startDate,breaks){let out=[],d=parseLocalDate(startDate),safe=0;breaks=normalizeBreaks(breaks);while(out.length<35&&safe++<500){while(weekHitsBreak(d,breaks)){d.setDate(d.getDate()+7)}const e=new Date(d);e.setDate(e.getDate()+4);out.push({week:out.length+1,start:isoDate(d),end:isoDate(e)});d.setDate(d.getDate()+7)}return out}
-function loadSchoolCalendar(){try{const x=JSON.parse(localStorage.getItem(SCHOOL_CALENDAR_KEY)||'null');if(x&&Array.isArray(x.weeks)&&x.weeks.length===35)schoolCalendar=x;else schoolCalendar.weeks=generateSchoolWeeks(schoolCalendar.startDate,[])}catch(e){schoolCalendar.weeks=generateSchoolWeeks(schoolCalendar.startDate,[])}}
-function saveSchoolCalendar(){localStorage.setItem(SCHOOL_CALENDAR_KEY,JSON.stringify(schoolCalendar))}
+function schoolCalendarCacheKey(){return currentAuthUser?.id?`${SCHOOL_CALENDAR_KEY}:${currentAuthUser.id}`:null}
+function resetSchoolCalendar(){schoolCalendar={startDate:'2026-09-07',breaks:[],weeks:generateSchoolWeeks('2026-09-07',[])}}
+function loadSchoolCalendar(){const key=schoolCalendarCacheKey();if(!key){resetSchoolCalendar();return}try{const x=JSON.parse(localStorage.getItem(key)||'null');if(x&&Array.isArray(x.weeks)&&x.weeks.length===35)schoolCalendar=x;else resetSchoolCalendar()}catch(e){resetSchoolCalendar()}}
+function saveSchoolCalendar(){const key=schoolCalendarCacheKey();if(key)localStorage.setItem(key,JSON.stringify(schoolCalendar))}
 function inferBreaksFromSchoolWeeks(weeks){
   const out=[];
   for(let i=1;i<(weeks||[]).length;i++){
@@ -279,9 +321,9 @@ async function restoreSchoolCalendarFromSupabase(){
   const schoolYearId=await ensureSupabaseSchoolYear();
   const {data,error}=await supabaseClient.from('tkb_academic_weeks').select('week_number,start_date,end_date,status,note').eq('user_id',currentAuthUser.id).eq('school_year_id',schoolYearId).order('week_number',{ascending:true});
   if(error)throw error;
-  if(!data?.length)return {weeks:0};
+  if(!data?.length){resetSchoolCalendar();saveSchoolCalendar();activateSelectedWeek();return {weeks:0};}
   const restored=data.filter(x=>Number(x.week_number)>=1&&Number(x.week_number)<=35&&x.start_date&&x.end_date).map(x=>({week:Number(x.week_number),start:x.start_date,end:x.end_date}));
-  if(restored.length!==35){console.warn('[TKB] Lịch Supabase chưa đủ 35 tuần, tiếp tục dùng lịch cục bộ.',{weeks:restored.length});return {weeks:0,incomplete:restored.length};}
+  if(restored.length!==35){console.warn('[TKB] Lịch Supabase chưa đủ 35 tuần; không dùng dữ liệu cục bộ để ghi đè.',{weeks:restored.length});resetSchoolCalendar();saveSchoolCalendar();activateSelectedWeek();return {weeks:0,incomplete:restored.length};}
   schoolCalendar={startDate:restored[0].start,breaks:inferBreaksFromSchoolWeeks(restored),weeks:restored};
   saveSchoolCalendar();
   activateSelectedWeek();
@@ -290,7 +332,26 @@ async function restoreSchoolCalendarFromSupabase(){
 }
 function selectedWeekDates(){const week=Number($('weekSelect')?.value||1),r=schoolCalendar.weeks.find(x=>Number(x.week)===week)||generateSchoolWeeks('2026-09-07',[])[week-1];const start=parseLocalDate(r.start),end=parseLocalDate(r.end),days=[];for(let i=0;i<5;i++){const d=new Date(start);d.setDate(d.getDate()+i);days.push(fmtDateVN(d))}return {week,start,end,days,fmt:d=>fmtDateVN(d)}}
 function modalShell(title,body){document.getElementById('manageModal')?.remove();const m=document.createElement('div');m.id='manageModal';m.className='manage-modal';m.innerHTML=`<div class="manage-dialog"><div class="manage-head"><h3>${title}</h3><button id="manageClose">×</button></div>${body}</div>`;document.body.appendChild(m);m.querySelector('#manageClose').onclick=()=>m.remove();m.onclick=e=>{if(e.target===m)m.remove()};return m}
-function openRepoManager(){const rows=scheduleVersions.map((v,i)=>`<tr><td>${i+1}</td><td>${esc(v.file)}</td><td><select data-repo-week="${i}">${Array.from({length:35},(_,j)=>`<option value="${j+1}" ${Number(v.startWeek)===j+1?'selected':''}>Tuần ${j+1}</option>`).join('')}</select></td><td>${esc(v.uploadedAtLabel||'')}</td><td>${v.lessons?.length||0}</td></tr>`).join('');const m=modalShell('QUẢN LÝ KHO THỜI KHÓA BIỂU',`<p class="manage-note">Có thể điều chỉnh thủ công tuần bắt đầu hiệu lực. Các tuần trước mốc mới vẫn dùng phiên bản TKB phù hợp trước đó.</p><div class="manage-scroll"><table class="manage-table"><thead><tr><th>TT</th><th>File TKB</th><th>Hiệu lực từ</th><th>Thời điểm lưu</th><th>Số tiết</th></tr></thead><tbody>${rows||'<tr><td colspan="5">Kho TKB đang trống.</td></tr>'}</tbody></table></div><div class="manage-actions"><button id="saveRepoEffect">LƯU HIỆU LỰC</button></div>`);m.querySelector('#saveRepoEffect').onclick=()=>{m.querySelectorAll('[data-repo-week]').forEach(el=>scheduleVersions[Number(el.dataset.repoWeek)].startWeek=Number(el.value));scheduleVersions.sort((a,b)=>a.startWeek-b.startWeek||String(a.uploadedAt||'').localeCompare(String(b.uploadedAt||'')));saveScheduleRepository();activateSelectedWeek();m.remove();alert('Đã cập nhật mốc hiệu lực TKB.')}}
+function openRepoManager(){
+  const rows=scheduleVersions.map((v,i)=>`<tr><td>${i+1}</td><td>${esc(v.file)}</td><td><select data-repo-week="${i}">${Array.from({length:35},(_,j)=>`<option value="${j+1}" ${Number(v.startWeek)===j+1?'selected':''}>Tuần ${j+1}</option>`).join('')}</select></td><td>${esc(v.uploadedAtLabel||'')}</td><td>${v.lessons?.length||0}</td></tr>`).join('');
+  const m=modalShell('QUẢN LÝ KHO THỜI KHÓA BIỂU',`<p class="manage-note">Có thể điều chỉnh thủ công tuần bắt đầu hiệu lực. Các tuần trước mốc mới vẫn dùng phiên bản TKB phù hợp trước đó.</p><div class="manage-scroll"><table class="manage-table"><thead><tr><th>TT</th><th>File TKB</th><th>Hiệu lực từ</th><th>Thời điểm lưu</th><th>Số tiết</th></tr></thead><tbody>${rows||'<tr><td colspan="5">Kho TKB đang trống.</td></tr>'}</tbody></table></div><div class="manage-actions"><button id="saveRepoEffect">LƯU HIỆU LỰC</button></div>`);
+  m.querySelector('#saveRepoEffect').onclick=async()=>{
+    const btn=m.querySelector('#saveRepoEffect');
+    try{
+      if(!currentAuthUser)throw new Error('Hãy đăng nhập giáo viên trước khi thay đổi hiệu lực TKB.');
+      const changed=[];
+      m.querySelectorAll('[data-repo-week]').forEach(el=>{
+        const v=scheduleVersions[Number(el.dataset.repoWeek)], next=Number(el.value);
+        if(v&&Number(v.startWeek)!==next){v.startWeek=next;changed.push(v)}
+      });
+      btn.disabled=true;btn.textContent='ĐANG LƯU...';
+      for(const v of changed)await updateTimetableEffectiveWeekSupabase(v);
+      scheduleVersions.sort((a,b)=>a.startWeek-b.startWeek||String(a.uploadedAt||'').localeCompare(String(b.uploadedAt||'')));
+      saveScheduleRepository();activateSelectedWeek();m.remove();
+      alert(changed.length?'Đã cập nhật mốc hiệu lực TKB trên Supabase.':'Không có thay đổi mốc hiệu lực TKB.');
+    }catch(e){console.error('[TKB] Không cập nhật được hiệu lực TKB',e);btn.disabled=false;btn.textContent='LƯU HIỆU LỰC';alert('Không cập nhật được hiệu lực TKB trên Supabase: '+(e.message||e));}
+  };
+}
 function breakRowsHtml(){const b=schoolCalendar.breaks.length?schoolCalendar.breaks:[{start:'',end:'',label:'Nghỉ Tết'}];return b.map((x,i)=>`<div class="break-row"><input data-break-label="${i}" value="${esc(x.label||'Nghỉ')}" placeholder="Tên kỳ nghỉ"><input type="date" data-break-start="${i}" value="${x.start||''}"><span>đến</span><input type="date" data-break-end="${i}" value="${x.end||''}"></div>`).join('')}
 function calendarWeekRows(){return schoolCalendar.weeks.map(w=>`<tr><td><b>Tuần ${w.week}</b></td><td><input type="date" data-week-start="${w.week}" value="${w.start}"></td><td><input type="date" data-week-end="${w.week}" value="${w.end}"></td><td>${fmtDateVN(w.start)} – ${fmtDateVN(w.end)}</td></tr>`).join('')}
 function openCalendarManager(){const m=modalShell('LỊCH NĂM HỌC – TUẦN 1 ĐẾN 35',`<p class="manage-note">Ngày của Phụ lục 1.4 lấy từ lịch này. Kỳ nghỉ không làm tăng số tuần chuyên môn.</p><div class="calendar-config"><label>Ngày bắt đầu Tuần 1 <input id="schoolStartDate" type="date" value="${schoolCalendar.startDate}"></label><b>Kỳ nghỉ / thời gian không tính tuần học</b><div id="breakRows">${breakRowsHtml()}</div><div><button id="addBreak">+ Thêm kỳ nghỉ</button> <button id="regenCalendar">TẠO LẠI 35 TUẦN</button></div></div><div class="manage-scroll calendar-scroll"><table class="manage-table"><thead><tr><th>Tuần</th><th>Từ ngày</th><th>Đến ngày</th><th>Hiển thị</th></tr></thead><tbody>${calendarWeekRows()}</tbody></table></div><div class="manage-actions"><button id="saveCalendar">LƯU LỊCH NĂM HỌC</button></div>`);
@@ -317,12 +378,17 @@ function scheduleFingerprint(lessons){
   for(let i=0;i<str.length;i++){h1^=str.charCodeAt(i);h1=Math.imul(h1,0x01000193)}
   return (h1>>>0).toString(16).padStart(8,'0')+':'+str.length;
 }
+function scheduleCacheKey(){
+  return currentAuthUser?.id ? `${TKB_STORE_KEY}:${currentAuthUser.id}` : `${TKB_STORE_KEY}:guest`;
+}
 function saveScheduleRepository(){
-  try{localStorage.setItem(TKB_STORE_KEY,JSON.stringify(scheduleVersions))}catch(e){console.warn('Không lưu được kho TKB',e)}
+  // Cache chỉ hỗ trợ hiển thị nhanh trên cùng máy; sau đăng nhập Supabase luôn ghi đè cache này.
+  try{localStorage.setItem(scheduleCacheKey(),JSON.stringify(scheduleVersions))}catch(e){console.warn('Không lưu được cache Kho TKB',e)}
 }
 function loadScheduleRepository(){
-  try{const raw=localStorage.getItem(TKB_STORE_KEY), arr=raw?JSON.parse(raw):[]; if(Array.isArray(arr)){scheduleVersions.splice(0,scheduleVersions.length,...arr.filter(v=>v&&Array.isArray(v.lessons)&&Number(v.startWeek)>=1&&Number(v.startWeek)<=35)); scheduleVersions.sort((a,b)=>a.startWeek-b.startWeek||String(a.uploadedAt||'').localeCompare(String(b.uploadedAt||'')));}}
-  catch(e){console.warn('Không đọc được kho TKB',e)}
+  // Trước khi xác định tài khoản chỉ đọc cache khách; dữ liệu tài khoản thật sẽ được tải từ Supabase sau đăng nhập.
+  try{const raw=localStorage.getItem(scheduleCacheKey()), arr=raw?JSON.parse(raw):[]; if(Array.isArray(arr)){scheduleVersions.splice(0,scheduleVersions.length,...arr.filter(v=>v&&Array.isArray(v.lessons)&&Number(v.startWeek)>=1&&Number(v.startWeek)<=35)); scheduleVersions.sort((a,b)=>a.startWeek-b.startWeek||String(a.uploadedAt||'').localeCompare(String(b.uploadedAt||'')));}}
+  catch(e){console.warn('Không đọc được cache Kho TKB',e)}
 }
 function findDuplicateSchedule(fingerprint){return scheduleVersions.find(v=>v.fingerprint===fingerprint)||null}
 function repositorySummary(){
@@ -605,13 +671,69 @@ function activateSelectedWeek(){
 }
 function finishLoad(){let month=(meta.file.match(/(?:THÁNG|THANG)\s*([0-9]{1,2})[.\-\s]*(20\d{2})/i)||[]); $('fileInfo').innerHTML=`<b>${esc(meta.file)}</b>${month.length?` · TKB tháng ${month[1]}/${month[2]}`:''} · <b>${allLessons.length} tiết</b>`; renderStats(); setOptions('fThu',['Hai','Ba','Tư','Năm','Sáu','Bảy','Chủ nhật'].filter(d=>allLessons.some(x=>x.thu===d)),'Tất cả Thứ'); setOptions('fPoint',allLessons.map(x=>x.diemTruong),'Tất cả điểm trường'); setOptions('fClass',allLessons.map(x=>x.lop),'Tất cả lớp'); $('scan').innerHTML=`<b>Đã quét: ${meta.sheets.length} sheet</b> · ${meta.sheets.map(s=>`${esc(s)}: ${meta.counts[s]||0} tiết Đậm`).join(' · ')} · <b>Tổng: ${allLessons.length}</b><br><small><b>TKB có hiệu lực:</b> ${repositorySummary()}</small>`; $('errors').innerHTML=meta.errors.length?`<div class="warn"><b>⚠️ DỮ LIỆU CẦN KIỂM TRA</b><br>${meta.errors.map(x=>`${esc(x.sheetNguon)} → dòng ${x.dongNguon} → cột ${x.cotNguon} → ${esc(x.oNguon)}: <span class="bad">${esc(x.loi)}</span>`).join('<br>')}</div>`:`<div class="info ok">✓ Không phát hiện tiết Đậm thiếu Thứ, Buổi, Lớp, Thời gian, Môn hoặc Tiết.</div>`; render()}
 function getConcurrentPeriods(){const n=Number($('concurrentPeriods')?.value||0);return Number.isFinite(n)&&n>0?Math.floor(n):0}
+// BƯỚC 4.3.1: lưu lựa chọn xuất cuối cùng theo đúng tài khoản giáo viên.
+function outputSettingsKey(){return currentAuthUser?.id?`tkb_output_settings_${currentAuthUser.id}`:null}
+function saveOutputSettings(){
+  const key=outputSettingsKey(); if(!key)return;
+  const settings={week:Math.max(1,Math.min(35,Number($('weekSelect')?.value||1))),concurrentPeriods:getConcurrentPeriods()};
+  try{localStorage.setItem(key,JSON.stringify(settings))}catch(e){console.warn('[TKB] Không lưu được cài đặt xuất cuối cùng',e)}
+}
+function restoreOutputSettings(){
+  const key=outputSettingsKey(); if(!key)return;
+  try{
+    const x=JSON.parse(localStorage.getItem(key)||'null'); if(!x)return;
+    const week=Math.max(1,Math.min(35,Number(x.week)||1));
+    if($('weekSelect'))$('weekSelect').value=String(week);
+    if($('concurrentPeriods'))$('concurrentPeriods').value=String(Math.max(0,Math.floor(Number(x.concurrentPeriods)||0)));
+  }catch(e){console.warn('[TKB] Không khôi phục được cài đặt xuất cuối cùng',e)}
+}
+// BƯỚC 4.3.3: điều chỉnh riêng bản kế hoạch xuất, không sửa TKB/Phụ lục 2 gốc.
+function outputEditsKey(){
+  if(!currentAuthUser?.id)return null;
+  return `tkb_output_edits_${currentAuthUser.id}_week_${Math.max(1,Math.min(35,Number($('weekSelect')?.value||1)))}`;
+}
+function outputLessonId(x){
+  return [clean(x.sheetNguon),Number(x.dongNguon)||0,Number(x.cotNguon)||0,clean(x.thu),clean(x.buoi),Number(x.tiet)||0,clean(x.lop),normalizeSubjectForPlan(x.monHoc)].join('|');
+}
+function loadOutputEdits(){
+  const key=outputEditsKey(); if(!key)return {};
+  try{const x=JSON.parse(localStorage.getItem(key)||'{}');return x&&typeof x==='object'&&!Array.isArray(x)?x:{}}catch(e){return {}}
+}
+function saveOutputEdits(edits){
+  const key=outputEditsKey(); if(!key)return;
+  try{localStorage.setItem(key,JSON.stringify(edits||{}))}catch(e){console.warn('[TKB] Không lưu được điều chỉnh bản kế hoạch tuần',e)}
+}
+function outputScheduleData(){
+  applyLessonPlan();
+  const edits=loadOutputEdits();
+  return filterSchedule().map(x=>{
+    const e=edits[outputLessonId(x)]; if(e?.deleted)return null;
+    if(!e)return x;
+    const y={...x};
+    if(e.monHoc!==undefined)y.monHoc=e.monHoc;
+    if(e.lop!==undefined)y.lop=e.lop;
+    if(e.title!==undefined)y.plan={...(x.plan||{}),title:e.title,annualPeriod:e.annualPeriod!==undefined?e.annualPeriod:(x.plan?.annualPeriod||x.planWeek||''),week:x.plan?.week||x.planWeek,subject:normalizeSubjectForPlan(e.monHoc!==undefined?e.monHoc:x.monHoc),grade:gradeFromClass(e.lop!==undefined?e.lop:x.lop)};
+    return y;
+  }).filter(Boolean);
+}
+function outputEditRowsHtml(){
+  applyLessonPlan(); const edits=loadOutputEdits();
+  const source=filterSchedule();
+  if(!source.length)return '<div class="preview-edit-empty">Không có tiết học để điều chỉnh.</div>';
+  return source.map((x,i)=>{
+    const id=outputLessonId(x),e=edits[id]||{},deleted=!!e.deleted;
+    const mon=e.monHoc!==undefined?e.monHoc:normalizeSubjectForPlan(x.monHoc), lop=e.lop!==undefined?e.lop:clean(x.lop);
+    const title=e.title!==undefined?e.title:(x.plan?.title||'[Chưa ghép Phụ lục 2]');
+    return `<div class="preview-edit-row ${deleted?'is-deleted':''}" data-output-id="${esc(id)}"><div class="preview-edit-pos"><b>${i+1}. Thứ ${esc(x.thu)} · ${esc(x.buoi)} · Tiết ${esc(x.tiet)}</b><small>${esc(x.diemTruong||'')}</small></div><label>Môn<input data-edit-field="monHoc" value="${esc(mon)}" ${deleted?'disabled':''}></label><label>Lớp<input data-edit-field="lop" value="${esc(lop)}" ${deleted?'disabled':''}></label><label class="preview-edit-title">Tên bài / Nội dung<textarea data-edit-field="title" rows="2" ${deleted?'disabled':''}>${esc(title)}</textarea></label><button type="button" class="preview-delete-row">${deleted?'Khôi phục':'Xóa'}</button></div>`;
+  }).join('');
+}
 function formalSubjectGradeText(data){
   const subjects=[...new Set(data.map(x=>normalizeSubjectForPlan(x.monHoc)).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'vi'));
   const grades=[...new Set(data.map(x=>{const m=String(x.lop||'').match(/\d+/);return m?Number(m[0]):null}).filter(Number.isFinite))].sort((a,b)=>a-b);
   return `Môn: ${subjects.join(', ')} – Khối: ${grades.join(', ')}`;
 }
 function exportExcel(){
-  const d=filterSchedule(); if(!d.length)return alert('Không có dữ liệu để xuất.');
+  const d=outputScheduleData(); if(!d.length)return alert('Không có dữ liệu để xuất.');
   const wb=XLSX.utils.book_new();
   const days=['Hai','Ba','Tư','Năm','Sáu'];
   const dayLabels=['Thứ hai','Thứ ba','Thứ tư','Thứ năm','Thứ sáu'];
@@ -645,10 +767,14 @@ function exportExcel(){
   const concurrent=getConcurrentPeriods();
   if(concurrent>0) rows.push([subjects.length+1,'Kiêm nhiệm','','',concurrent,'','']);
   const summaryDetailRows=subjects.length+(concurrent>0?1:0);
-  const sumRow=rows.length+1; rows.push(['Tổng số','','','',d.length+concurrent,'','']);
+  const sumRow=rows.length+1; rows.push(['','Tổng số','','',d.length+concurrent,'','']);
   rows.push(['','','','','','','']);
-  rows.push(['PHÓ HIỆU TRƯỞNG','','TỔ TRƯỞNG','','','NGƯỜI LẬP KẾ HOẠCH','']);
+  const signatureDateRow=rows.length+1;
+  rows.push(['','','','',formalSignatureDate(wd),'','']);
+  const signatureTitleRow=rows.length+1;
+  rows.push(['P. HIỆU TRƯỞNG','','TỔ TRƯỞNG','','','NGƯỜI LẬP KẾ HOẠCH','']);
   rows.push(['','','','','','','']); rows.push(['','','','','','','']);
+  const signatureNameRow=rows.length+1;
   rows.push(['','','','','','Võ Thanh Đậm','']);
 
   const ws=XLSX.utils.aoa_to_sheet(rows);
@@ -663,16 +789,17 @@ function exportExcel(){
     ...Array.from({length:summaryDetailRows+1},(_,i)=>{
       const r=totalRow+2+i; return [`B${r}:D${r}`,`E${r}:F${r}`];
     }).flat(),
-    `A${sumRow}:D${sumRow}`,`E${sumRow}:F${sumRow}`,
-    `A${sumRow+2}:B${sumRow+2}`,`C${sumRow+2}:D${sumRow+2}`,`F${sumRow+2}:G${sumRow+2}`,
-    `F${sumRow+5}:G${sumRow+5}`
+    `B${sumRow}:D${sumRow}`,`E${sumRow}:F${sumRow}`,
+    `E${signatureDateRow}:G${signatureDateRow}`,
+    `A${signatureTitleRow}:B${signatureTitleRow}`,`C${signatureTitleRow}:D${signatureTitleRow}`,`F${signatureTitleRow}:G${signatureTitleRow}`,
+    `F${signatureNameRow}:G${signatureNameRow}`
   ];
   ws['!merges']=merges.map(XLSX.utils.decode_range);
   ws['!cols']=[{wch:10},{wch:7},...days.map(()=>({wch:24}))];
-  ws['!rows']=rows.map((_,i)=>({hpt:i<4?[18,20,19,21][i]: (i===4||i===5?28 : (i>=6&&i<endSchedule?58:22))}));
+  ws['!rows']=rows.map((_,i)=>({hpt:i<4?[22,26,24,24][i]:(i===4||i===5?34:(i>=6&&i<endSchedule?78:26))}));
   ws['!freeze']={xSplit:2,ySplit:6};
-  ws['!pageSetup']={orientation:'landscape',paperSize:9,fitToWidth:1,fitToHeight:1};
-  ws['!margins']={left:0.2,right:0.2,top:0.25,bottom:0.25,header:0.1,footer:0.1};
+  ws['!pageSetup']={orientation:'landscape',paperSize:9,fitToWidth:1,fitToHeight:0,horizontalCentered:true};
+  ws['!margins']={left:0.25,right:0.25,top:0.3,bottom:0.3,header:0.1,footer:0.1};
   ws['!printArea']=`A1:G${rows.length}`;
   const black='000000', navy='173F73', pale='F7FBFF', light='EAF2FB';
   const thin={style:'thin',color:{rgb:black}}, med={style:'medium',color:{rgb:black}};
@@ -680,26 +807,38 @@ function exportExcel(){
   const center={horizontal:'center',vertical:'center',wrapText:true};
   for(let R=0;R<rows.length;R++) for(let C=0;C<7;C++){
     const a=XLSX.utils.encode_cell({r:R,c:C}); if(!ws[a])ws[a]={t:'s',v:''};
-    ws[a].s={font:{name:'Times New Roman',sz:10,color:{rgb:black}},alignment:{vertical:'center',wrapText:true},border};
+    ws[a].s={font:{name:'Times New Roman',sz:12,color:{rgb:black}},alignment:{vertical:'center',wrapText:true},border};
   }
-  ['A1','A2','A3','A4'].forEach((a,i)=>ws[a].s={font:{name:'Times New Roman',sz:[10,12,10,11][i],bold:true,color:{rgb:black}},alignment:center});
-  for(let C=0;C<7;C++) for(let R=4;R<=5;R++){let a=XLSX.utils.encode_cell({r:R,c:C});ws[a].s={font:{name:'Times New Roman',sz:10,bold:true},alignment:center,border:{top:med,bottom:med,left:thin,right:thin},fill:{fgColor:{rgb:'F2F2F2'}}};}
-  for(let R=6;R<endSchedule;R++) for(let C=0;C<7;C++){let a=XLSX.utils.encode_cell({r:R,c:C});ws[a].s={font:{name:'Times New Roman',sz:C<2?10:9,bold:C<2},alignment:C<2?center:{horizontal:'center',vertical:'center',wrapText:true},border,fill:{fgColor:{rgb:C<2?light:(R%2?pale:'FFFFFF')}}};}
+  // Khối tiêu đề là văn bản hành chính: không kẻ khung/đường viền.
+  for(let R=0;R<4;R++) for(let C=0;C<7;C++){
+    const a=XLSX.utils.encode_cell({r:R,c:C}); if(!ws[a])ws[a]={t:'s',v:''};
+    ws[a].s={font:{name:'Times New Roman',sz:12,bold:true,color:{rgb:black}},alignment:center,border:{}};
+  }
+  for(let C=0;C<7;C++) for(let R=4;R<=5;R++){let a=XLSX.utils.encode_cell({r:R,c:C});ws[a].s={font:{name:'Times New Roman',sz:12,bold:true},alignment:center,border:{top:med,bottom:med,left:thin,right:thin},fill:{fgColor:{rgb:'F2F2F2'}}};}
+  for(let R=6;R<endSchedule;R++) for(let C=0;C<7;C++){let a=XLSX.utils.encode_cell({r:R,c:C});ws[a].s={font:{name:'Times New Roman',sz:12,bold:C<2},alignment:C<2?center:{horizontal:'left',vertical:'center',wrapText:true},border,fill:{fgColor:{rgb:C<2?light:(R%2?pale:'FFFFFF')}}};}
   ws[`A${morningStart}`].s.font.bold=true; ws[`A${afternoonStart}`].s.font.bold=true;
   for(let C=0;C<7;C++){let a=XLSX.utils.encode_cell({r:endSchedule-1,c:C}); if(ws[a]) ws[a].s.border.bottom=med;}
   // Tổng số tiết
-  for(let C=0;C<7;C++){const a=XLSX.utils.encode_cell({r:totalRow-1,c:C});ws[a].s={font:{name:'Times New Roman',sz:10,bold:true},alignment:center,border};}
+  for(let C=0;C<7;C++){const a=XLSX.utils.encode_cell({r:totalRow-1,c:C});ws[a].s={font:{name:'Times New Roman',sz:12,bold:true},alignment:center,border};}
   // Tổng hợp
-  ws[`A${totalRow+1}`].s={font:{name:'Times New Roman',sz:11,bold:true},alignment:center};
-  for(let C=0;C<7;C++){let a=XLSX.utils.encode_cell({r:totalRow+1,c:C});ws[a].s={font:{name:'Times New Roman',sz:10,bold:true},alignment:center,border,fill:{fgColor:{rgb:'F2F2F2'}}};}
-  for(let R=totalRow+2;R<sumRow;R++) for(let C=0;C<7;C++){let a=XLSX.utils.encode_cell({r:R,c:C});ws[a].s={font:{name:'Times New Roman',sz:10,bold:R===totalRow+2},alignment:center,border};}
-  for(let C=0;C<7;C++){let a=XLSX.utils.encode_cell({r:sumRow-1,c:C});ws[a].s={font:{name:'Times New Roman',sz:10,bold:true},alignment:center,border};}
-  [sumRow+1,sumRow+4].forEach(r=>{for(let C=0;C<7;C++){let a=XLSX.utils.encode_cell({r:r,c:C});ws[a].s={font:{name:'Times New Roman',sz:10,bold:true},alignment:center};}});
+  ws[`A${totalRow+1}`].s={font:{name:'Times New Roman',sz:12,bold:true},alignment:center};
+  for(let C=0;C<7;C++){let a=XLSX.utils.encode_cell({r:totalRow+1,c:C});ws[a].s={font:{name:'Times New Roman',sz:12,bold:true},alignment:center,border,fill:{fgColor:{rgb:'F2F2F2'}}};}
+  for(let R=totalRow+2;R<sumRow;R++) for(let C=0;C<7;C++){let a=XLSX.utils.encode_cell({r:R,c:C});ws[a].s={font:{name:'Times New Roman',sz:12,bold:R===totalRow+2},alignment:center,border};}
+  for(let C=0;C<7;C++){let a=XLSX.utils.encode_cell({r:sumRow-1,c:C});ws[a].s={font:{name:'Times New Roman',sz:12,bold:true},alignment:center,border};}
+  // Khu vực ngày ký/chữ ký là phần văn bản, không có bất kỳ khung ô nào.
+  for(let R=sumRow;R<rows.length;R++) for(let C=0;C<7;C++){
+    const a=XLSX.utils.encode_cell({r:R,c:C}); if(!ws[a])ws[a]={t:'s',v:''};
+    ws[a].s={font:{name:'Times New Roman',sz:12,color:{rgb:black}},alignment:{vertical:'center',wrapText:true},border:{}};
+  }
+  for(let C=0;C<7;C++){let a=XLSX.utils.encode_cell({r:signatureDateRow-1,c:C});ws[a].s={font:{name:'Times New Roman',sz:12,italic:true},alignment:{horizontal:'right',vertical:'center',wrapText:true},border:{}};}
+  [signatureTitleRow-1,signatureNameRow-1].forEach(r=>{for(let C=0;C<7;C++){let a=XLSX.utils.encode_cell({r,c:C});ws[a].s={font:{name:'Times New Roman',sz:12,bold:true},alignment:center,border:{}};}});
   XLSX.utils.book_append_sheet(wb,ws,'TKB tuần');
 
   const src=[['Sheet','Dòng','Cột','Ô nguồn','Nội dung ô gốc','Thứ','Buổi','Tiết nguồn','Tiết xác định','Thời gian','Lớp','Môn học','Điểm trường','Ghi chú'],...d.map(x=>[x.sheetNguon,x.dongNguon,`${colLetter(x.cotNguon-1)} (${x.cotNguon})`,`${x.sheetNguon}!${colLetter(x.cotNguon-1)}${x.dongNguon}`,x.oNguon,`Thứ ${x.thu}`,clean(x.buoi),x.tietNguon||'',x.tiet,x.thoiGian,x.lop,normalizeSubjectForPlan(x.monHoc),x.diemTruong,x.ghiChuTiet||''])];
   const ws2=XLSX.utils.aoa_to_sheet(src); ws2['!cols']=[9,8,9,13,22,11,10,11,12,18,10,18,22,48].map(w=>({wch:w})); ws2['!autofilter']={ref:`A1:N${src.length}`};
-  for(let C=0;C<14;C++){const a=XLSX.utils.encode_cell({r:0,c:C});ws2[a].s={font:{name:'Arial',sz:10,bold:true,color:{rgb:'FFFFFF'}},fill:{fgColor:{rgb:navy}},alignment:center,border};}
+  ws2['!pageSetup']={orientation:'landscape',paperSize:9,fitToWidth:1,fitToHeight:0,horizontalCentered:true};
+  ws2['!margins']={left:0.25,right:0.25,top:0.3,bottom:0.3,header:0.1,footer:0.1};
+  for(let R=0;R<src.length;R++)for(let C=0;C<14;C++){const a=XLSX.utils.encode_cell({r:R,c:C});if(!ws2[a])continue;ws2[a].s={font:{name:'Times New Roman',sz:12,bold:R===0,color:{rgb:R===0?'FFFFFF':'000000'}},fill:R===0?{fgColor:{rgb:navy}}:undefined,alignment:{horizontal:R===0?'center':'left',vertical:'center',wrapText:true},border};}
   XLSX.utils.book_append_sheet(wb,ws2,'Đối chiếu nguồn');
   XLSX.writeFile(wb,`TKB_CA_NHAN_GV_DAM_TUAN_${wd.week}.xlsx`,{cellStyles:true});
 }
@@ -713,9 +852,15 @@ function excelLessonCell(data,day,session,tiet){
   return items.map(x=>`${x.monHoc} ${x.lop}\n${clean(x.diemTruong).replace(/^Điểm\s+/i,'Điểm ')}\n${x.thoiGian}`).join('\n────────\n');
 }
 function selectedWeekDates(){
-  const week=Number($('weekSelect').value||1), start=new Date(2026,8,7+(week-1)*7), end=new Date(start); end.setDate(start.getDate()+4);
-  const pad=n=>String(n).padStart(2,'0'), fmt=x=>`${pad(x.getDate())}/${pad(x.getMonth()+1)}/${x.getFullYear()}`;
-  return {week,start,end,fmt,days:Array.from({length:5},(_,i)=>{const x=new Date(start);x.setDate(start.getDate()+i);return fmt(x)})};
+  const week=Number($('weekSelect')?.value||1),r=schoolCalendar.weeks.find(x=>Number(x.week)===week)||generateSchoolWeeks('2026-09-07',[])[week-1];
+  const start=parseLocalDate(r.start),end=parseLocalDate(r.end),days=[];
+  for(let i=0;i<5;i++){const d=new Date(start);d.setDate(d.getDate()+i);days.push(fmtDateVN(d))}
+  return {week,start,end,days,fmt:d=>fmtDateVN(d)};
+}
+function formalSignatureDate(wd){
+  const d=new Date(wd.start);d.setDate(d.getDate()-1);
+  const pad=n=>String(n).padStart(2,'0');
+  return `Đặc khu Kiên Hải, ngày ${pad(d.getDate())} tháng ${pad(d.getMonth()+1)} năm ${d.getFullYear()}`;
 }
 function formalLessonHtml(data,day,session,tiet){
   const items=data.filter(x=>x.thu===day&&normKey(x.buoi)===normKey(session)&&Number(x.tiet)===Number(tiet));
@@ -725,27 +870,148 @@ function buildFormalOutput(data){
   applyLessonPlan(); const wd=selectedWeekDates(), days=['Hai','Ba','Tư','Năm','Sáu'], labels=['Thứ hai','Thứ ba','Thứ tư','Thứ năm','Thứ sáu'];
   const morning=Math.max(4,...data.filter(x=>normKey(x.buoi)==='sang').map(x=>Number(x.tiet)||0)), afternoon=Math.max(3,...data.filter(x=>normKey(x.buoi)==='chieu').map(x=>Number(x.tiet)||0));
   const subjects=[...new Set(data.map(x=>normalizeSubjectForPlan(x.monHoc)))].filter(Boolean);
-  let grid=`<table class="formal-grid"><thead><tr><th colspan="2">Thời gian</th>${labels.map((l,i)=>`<th>Ngày ${wd.days[i]}<br>${l}</th>`).join('')}<th>Nội dung điều chỉnh</th></tr><tr><th>Buổi</th><th>Tiết</th>${labels.map(l=>`<th>${l}</th>`).join('')}<th></th></tr></thead><tbody>`;
+  let grid=`<table class="formal-grid"><colgroup><col class="col-session"><col class="col-period">${days.map(()=>'<col class="col-day">').join('')}<col class="col-adjust"></colgroup><thead><tr><th colspan="2">Thời gian</th>${labels.map((l,i)=>`<th>Ngày ${wd.days[i]}<br>${l}</th>`).join('')}<th>Nội dung điều chỉnh</th></tr><tr><th>Buổi</th><th>Tiết</th>${labels.map(l=>`<th>${l}</th>`).join('')}<th></th></tr></thead><tbody>`;
   for(let t=1;t<=morning;t++)grid+=`<tr>${t===1?`<th rowspan="${morning}">Sáng</th>`:''}<th>${t}</th>${days.map(day=>`<td>${formalLessonHtml(data,day,'Sáng',t)}</td>`).join('')}<td></td></tr>`;
   for(let t=1;t<=afternoon;t++)grid+=`<tr>${t===1?`<th rowspan="${afternoon}">Chiều</th>`:''}<th>${t}</th>${days.map(day=>`<td>${formalLessonHtml(data,day,'Chiều',t)}</td>`).join('')}<td></td></tr>`;
   grid+=`<tr><th colspan="8">Tổng số: ${data.length} tiết</th></tr></tbody></table>`;
   const concurrent=getConcurrentPeriods();
   const concurrentRow=concurrent>0?`<tr><td>${subjects.length+1}</td><td>Kiêm nhiệm</td><td>${concurrent}</td><td></td></tr>`:'';
-  let sum=`<h3>TỔNG HỢP</h3><table class="formal-summary"><tr><th>TT</th><th>Nội dung</th><th>Số lượng tiết học</th><th>Ghi chú</th></tr>${subjects.map((sub,i)=>`<tr><td>${i+1}</td><td>${esc(sub)}</td><td>${data.filter(x=>normalizeSubjectForPlan(x.monHoc)===sub).length}</td><td></td></tr>`).join('')}${concurrentRow}<tr><th colspan="2">Tổng số</th><th>${data.length+concurrent}</th><th></th></tr></table>`;
-  return `<section id="formalOutput" class="formal-output"><div class="formal-title"><b>PHỤ LỤC 1.4</b><h2>Hoạt động giáo dục tuần ${wd.week}</h2><p><b>Năm học 2026 – 2027. ${esc(formalSubjectGradeText(data))}, Trường TH – THCS & THPT Lại Sơn</b></p><p><b>Tuần ${wd.week}: từ ngày ${wd.fmt(wd.start)} đến ${wd.fmt(wd.end)}</b></p></div>${grid}${sum}<div class="formal-date">Đặc khu Kiên Hải, ngày ..... tháng ..... năm 2026</div><div class="formal-sign"><div><b>P.HIỆU TRƯỞNG</b></div><div><b>TỔ TRƯỞNG</b></div><div><b>NGƯỜI LẬP KẾ HOẠCH</b><br><br><br><b>Võ Thanh Đậm</b></div></div></section>`;
+  let sum=`<h3>TỔNG HỢP</h3><table class="formal-summary"><tr><th>TT</th><th>Nội dung</th><th>Số lượng tiết học</th><th>Ghi chú</th></tr>${subjects.map((sub,i)=>`<tr><td>${i+1}</td><td>${esc(sub)}</td><td>${data.filter(x=>normalizeSubjectForPlan(x.monHoc)===sub).length}</td><td></td></tr>`).join('')}${concurrentRow}<tr class="formal-summary-total"><th></th><th>Tổng số</th><th>${data.length+concurrent}</th><th></th></tr></table>`;
+  return `<section id="formalOutput" class="formal-output"><div class="formal-title"><b>PHỤ LỤC 1.4</b><h2>Hoạt động giáo dục tuần ${wd.week}</h2><p><b>Năm học 2026 – 2027. ${esc(formalSubjectGradeText(data))}, Trường TH – THCS & THPT Lại Sơn</b></p><p><b>Tuần ${wd.week}: từ ngày ${wd.fmt(wd.start)} đến ${wd.fmt(wd.end)}</b></p></div>${grid}${sum}<div class="formal-date">${esc(formalSignatureDate(wd))}</div><div class="formal-sign"><div><b>P.HIỆU TRƯỞNG</b></div><div><b>TỔ TRƯỞNG</b></div><div><b>NGƯỜI LẬP KẾ HOẠCH</b><br><br><br><b>Võ Thanh Đậm</b></div></div></section>`;
+}
+function ensureFormalOutputStyles(){
+  if(document.getElementById('formalOutputStylesV42'))return;
+  const style=document.createElement('style'); style.id='formalOutputStylesV42';
+  style.textContent=`
+    .formal-holder{position:fixed;left:-10000px;top:0;width:283mm;background:#fff;z-index:-1}
+    .formal-output{box-sizing:border-box;width:283mm;padding:2mm;background:#fff;color:#000;font-family:"Times New Roman",serif;font-size:12pt;line-height:1.08}
+    .formal-title{text-align:center;margin:0 0 1.5mm}.formal-title>b{display:block;font-size:12pt}.formal-title h2{font-size:12pt;margin:.5mm 0;font-weight:700}.formal-title p{font-size:12pt;margin:.35mm 0}
+    .formal-grid,.formal-summary{width:100%;border-collapse:collapse;table-layout:fixed}
+    .formal-grid th,.formal-grid td,.formal-summary th,.formal-summary td{border:1px solid #000;padding:.7mm .9mm;vertical-align:middle;text-align:center;font-size:12pt;overflow-wrap:break-word;word-break:normal}
+    .formal-grid thead{display:table-header-group}.formal-grid tr,.formal-summary tr{break-inside:avoid;page-break-inside:avoid}
+    .formal-grid .col-session{width:13mm}.formal-grid .col-period{width:10mm}.formal-grid .col-adjust{width:24mm}
+    .formal-grid .col-day{width:auto}
+    .formal-grid thead th{padding:.7mm .6mm;line-height:1.05}
+    .formal-lesson{font-size:12pt;line-height:1.08;text-align:left}.formal-lesson b{font-size:12pt}.formal-lesson+hr{border:0;border-top:.3px solid #777;margin:.5mm 0}
+    .formal-output h3{text-align:center;font-size:12pt;margin:1.5mm 0 .7mm}.formal-summary{width:82%;margin:0 auto}.formal-summary th,.formal-summary td{padding:.55mm 1mm;line-height:1.05}
+    .formal-date{text-align:right;font-style:italic;margin:1.5mm 4mm .5mm 0}.formal-sign{display:grid;grid-template-columns:1fr 1fr 1fr;text-align:center;gap:8mm;margin-top:.5mm;min-height:20mm}
+    @media print{
+      @page{size:A4 landscape;margin:5mm}
+      html,body{margin:0!important;padding:0!important}
+      body.printing-formal>*:not(.print-formal){display:none!important}
+      body.printing-formal .print-formal{position:static!important;left:auto!important;top:auto!important;width:287mm!important;margin:0!important;z-index:auto!important}
+      body.printing-formal .formal-output{width:287mm!important;padding:0!important;margin:0 auto!important}
+      body.printing-formal .formal-grid th,body.printing-formal .formal-grid td{padding:.45mm .65mm!important}
+      body.printing-formal .formal-grid{table-layout:fixed!important}
+      body.printing-formal .formal-title{margin-bottom:1mm!important}
+      .formal-grid tr,.formal-summary tr,.formal-sign{break-inside:avoid;page-break-inside:avoid}
+      .formal-summary,.formal-date,.formal-sign{break-inside:avoid;page-break-inside:avoid}
+    }`;
+  document.head.appendChild(style);
 }
 function ensureWeekForOutput(){const previous=currentView; if(currentView!=='week'){currentView='week';render()} return previous}
 async function exportPDF(){
-  const d=filterSchedule(); if(!d.length)return alert('Không có dữ liệu để xuất.');
+  const d=outputScheduleData(); if(!d.length)return alert('Không có dữ liệu để xuất.');
   if(!lessonPlanMap.size)return alert('Hãy tải Phụ lục 2 trước khi xuất PDF để có đầy đủ tên bài học.');
   if(typeof html2canvas==='undefined')return alert('Không tải được thư viện xuất PDF.');
+  ensureFormalOutputStyles();
   const holder=document.createElement('div');holder.className='formal-holder';holder.innerHTML=buildFormalOutput(d);document.body.appendChild(holder);
-  try{await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));const target=holder.querySelector('.formal-output'),canvas=await html2canvas(target,{scale:2,backgroundColor:'#ffffff',useCORS:true,logging:false});const {jsPDF}=window.jspdf,pdf=new jsPDF({orientation:'landscape',unit:'mm',format:'a4'}),pw=297,ph=210,margin=5,maxW=pw-margin*2,maxH=ph-margin*2,ratio=Math.min(maxW/canvas.width,maxH/canvas.height),w=canvas.width*ratio,h=canvas.height*ratio;pdf.addImage(canvas.toDataURL('image/jpeg',0.95),'JPEG',(pw-w)/2,margin,w,h,undefined,'FAST');pdf.save(`PHU_LUC_1_4_TUAN_${$('weekSelect').value}.pdf`)}finally{holder.remove()}
+  try{
+    await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));
+    const target=holder.querySelector('.formal-output'),canvas=await html2canvas(target,{scale:2,backgroundColor:'#ffffff',useCORS:true,logging:false,windowWidth:target.scrollWidth});
+    const {jsPDF}=window.jspdf,pdf=new jsPDF({orientation:'landscape',unit:'mm',format:'a4'}),pw=297,ph=210,margin=5,maxW=pw-margin*2,maxH=ph-margin*2;
+    // Giữ cỡ chữ theo chiều rộng A4 ngang và chỉ ngắt PDF tại ranh giới hàng/khối.
+    const drawW=maxW, pxPerMm=canvas.width/drawW, maxSlicePx=Math.floor(maxH*pxPerMm);
+    const scaleY=canvas.height/target.scrollHeight, top0=target.getBoundingClientRect().top;
+    const cuts=[0,...[...target.querySelectorAll('.formal-grid tr,.formal-summary tr,.formal-date,.formal-sign')].map(el=>Math.round((el.getBoundingClientRect().bottom-top0)*scaleY)),canvas.height]
+      .filter((v,i,a)=>v>=0&&v<=canvas.height&&a.indexOf(v)===i).sort((a,b)=>a-b);
+    let y0=0,page=0;
+    while(y0<canvas.height-2){
+      const limit=Math.min(canvas.height,y0+maxSlicePx);
+      let y1=cuts.filter(v=>v>y0+20&&v<=limit).pop()||limit;
+      if(y1<=y0)y1=limit;
+      const slice=document.createElement('canvas');slice.width=canvas.width;slice.height=y1-y0;
+      slice.getContext('2d').drawImage(canvas,0,y0,canvas.width,y1-y0,0,0,canvas.width,y1-y0);
+      if(page++)pdf.addPage('a4','landscape');
+      const drawH=(y1-y0)/pxPerMm;
+      pdf.addImage(slice.toDataURL('image/jpeg',0.96),'JPEG',margin,margin,drawW,drawH,undefined,'FAST');
+      y0=y1;
+    }
+    pdf.save(`PHU_LUC_1_4_TUAN_${$('weekSelect').value}.pdf`);
+  }finally{holder.remove()}
+}
+function openOutputPreview(){
+  let d=outputScheduleData(); if(!d.length&&!filterSchedule().length)return alert('Không có dữ liệu để xem trước.');
+  if(!lessonPlanMap.size)return alert('Hãy tải Phụ lục 2 trước khi xem trước để có đầy đủ tên bài học.');
+  ensureFormalOutputStyles();
+  document.getElementById('outputPreviewModal')?.remove();
+  const modal=document.createElement('div'); modal.id='outputPreviewModal'; modal.className='output-preview-modal';
+  const renderPreview=()=>{
+    d=outputScheduleData();
+    const body=modal.querySelector('.output-preview-scroll'); if(body)body.innerHTML=d.length?buildFormalOutput(d):'<div class="preview-no-lessons">Bản xuất hiện không còn tiết nào. Có thể vào Sửa để khôi phục.</div>';
+    const editBody=modal.querySelector('.output-edit-body'); if(editBody)editBody.innerHTML=outputEditRowsHtml();
+    bindEditRows();
+  };
+  modal.innerHTML=`<div class="output-preview-dialog"><div class="output-preview-bar"><b>XEM TRƯỚC PHỤ LỤC 1.4 · TUẦN ${esc($('weekSelect').value)}</b><div><button type="button" class="preview-edit">Sửa</button><button type="button" class="preview-export-excel">Xuất Excel</button><button type="button" class="preview-export-pdf">Xuất PDF</button><button type="button" class="preview-print">In</button><button type="button" class="preview-close">Đóng</button></div></div><div class="output-edit-panel" hidden><div class="output-edit-head"><b>ĐIỀU CHỈNH BẢN KẾ HOẠCH TUẦN</b><span>Chỉ ảnh hưởng bản xuất, không sửa TKB hoặc Phụ lục 2 gốc.</span><div><button type="button" class="preview-update">Cập nhật</button><button type="button" class="preview-reset">Xóa điều chỉnh tuần</button></div></div><div class="output-edit-body">${outputEditRowsHtml()}</div></div><div class="output-preview-scroll">${d.length?buildFormalOutput(d):''}</div></div>`;
+  document.body.appendChild(modal);
+  if(!document.getElementById('outputPreviewStylesV433')){
+    const st=document.createElement('style'); st.id='outputPreviewStylesV433'; st.textContent=`
+      .output-preview-modal{position:fixed;inset:0;background:rgba(15,23,42,.72);z-index:100000;display:flex;align-items:center;justify-content:center;padding:18px}
+      .output-preview-dialog{width:min(97vw,1550px);height:95vh;background:#e9edf2;border-radius:10px;box-shadow:0 24px 70px rgba(0,0,0,.35);display:flex;flex-direction:column;overflow:hidden}
+      .output-preview-bar{flex:0 0 auto;display:flex;align-items:center;justify-content:space-between;gap:16px;padding:10px 14px;background:#fff;border-bottom:1px solid #cbd5e1;font-family:Arial,sans-serif}
+      .output-preview-bar>div,.output-edit-head>div{display:flex;gap:8px;flex-wrap:wrap;align-items:center}.output-preview-bar button,.output-edit-panel button{height:36px;border:1px solid #cbd5e1;background:#fff;color:#334155;border-radius:8px;padding:0 14px;cursor:pointer;font:600 13px Arial,sans-serif;box-shadow:0 1px 2px rgba(15,23,42,.06);transition:.15s ease}.output-preview-bar button:hover,.output-edit-panel button:hover{background:#f8fafc;border-color:#94a3b8;transform:translateY(-1px)}.output-preview-bar .preview-export-pdf,.output-preview-bar .preview-export-excel,.output-preview-bar .preview-print{background:#0f4c81;color:#fff;border-color:#0f4c81}.output-preview-bar .preview-export-pdf:hover,.output-preview-bar .preview-export-excel:hover,.output-preview-bar .preview-print:hover{background:#123f68;border-color:#123f68}.output-preview-bar .preview-edit{background:#eef6ff;color:#0f4c81;border-color:#b8d6f2}.output-preview-bar .preview-close{background:#f8fafc}.output-edit-panel .preview-update{background:#0f4c81;color:#fff;border-color:#0f4c81}.output-edit-panel .preview-reset,.preview-delete-row{background:#fff7f7!important;color:#b42318!important;border-color:#f3b7b2!important}
+      .output-preview-scroll{flex:1;overflow:auto;padding:18px}.output-preview-scroll .formal-output{margin:0 auto;box-shadow:0 3px 18px rgba(0,0,0,.16)}
+      .output-edit-panel{flex:1;overflow:auto;background:#fff;padding:14px 16px;font-family:Arial,sans-serif}.output-edit-head{position:sticky;top:-14px;z-index:2;background:#fff;padding:10px 0;border-bottom:1px solid #dbe3ec;display:grid;grid-template-columns:1fr auto;gap:4px 12px;align-items:center}.output-edit-head>span{font-size:12px;color:#64748b}.output-edit-head>div{grid-row:1/3;grid-column:2}
+      .preview-edit-row{display:grid;grid-template-columns:190px 150px 110px minmax(360px,1fr) 76px;gap:10px;align-items:end;padding:10px 0;border-bottom:1px solid #e2e8f0}.preview-edit-row label{font-size:12px;font-weight:700;color:#475569}.preview-edit-row input,.preview-edit-row textarea{box-sizing:border-box;width:100%;margin-top:4px;border:1px solid #cbd5e1;border-radius:5px;padding:7px 8px;font:14px Arial,sans-serif;background:#fff}.preview-edit-row textarea{resize:vertical}.preview-edit-pos{align-self:center}.preview-edit-pos small{display:block;color:#64748b;margin-top:4px}.preview-edit-row.is-deleted{opacity:.55;background:#f8fafc}.preview-delete-row{align-self:center}.preview-no-lessons,.preview-edit-empty{padding:28px;text-align:center;color:#64748b}
+    `; document.head.appendChild(st);
+  }
+  const bindEditRows=()=>{
+    modal.querySelectorAll('.preview-delete-row').forEach(btn=>btn.onclick=()=>{
+      const row=btn.closest('[data-output-id]'),id=row.dataset.outputId,edits=loadOutputEdits(),old=edits[id]||{};
+      edits[id]={...old,deleted:!old.deleted}; saveOutputEdits(edits); renderPreview();
+    });
+  };
+  bindEditRows();
+  const close=()=>modal.remove();
+  modal.querySelector('.preview-close').onclick=close;
+  modal.addEventListener('click',e=>{if(e.target===modal)close()});
+  modal.querySelector('.preview-edit').onclick=()=>{const p=modal.querySelector('.output-edit-panel'),v=modal.querySelector('.output-preview-scroll'),show=p.hidden;p.hidden=!show;v.style.display=show?'none':'';modal.querySelector('.preview-edit').textContent=show?'Xem bản kế hoạch':'Sửa'};
+  modal.querySelector('.preview-update').onclick=()=>{
+    const edits=loadOutputEdits();
+    modal.querySelectorAll('.preview-edit-row[data-output-id]').forEach(row=>{
+      const id=row.dataset.outputId,old=edits[id]||{}; if(old.deleted)return;
+      const val=f=>row.querySelector(`[data-edit-field="${f}"]`)?.value??'';
+      edits[id]={...old,monHoc:clean(val('monHoc')),lop:clean(val('lop')),title:clean(val('title'))};
+    });
+    saveOutputEdits(edits); renderPreview();
+    const p=modal.querySelector('.output-edit-panel'),v=modal.querySelector('.output-preview-scroll');p.hidden=true;v.style.display='';modal.querySelector('.preview-edit').textContent='Sửa';
+  };
+  modal.querySelector('.preview-reset').onclick=()=>{if(!confirm('Xóa toàn bộ điều chỉnh riêng của tuần này và trở về dữ liệu gốc?'))return;const key=outputEditsKey();if(key)localStorage.removeItem(key);renderPreview()};
+  modal.querySelector('.preview-export-excel').onclick=()=>exportExcel();
+  modal.querySelector('.preview-export-pdf').onclick=()=>exportPDF();
+  modal.querySelector('.preview-print').onclick=()=>{close();printSchedule()};
+}
+function ensurePreviewButton(){
+  // BƯỚC 4.3.5: giao diện chính chỉ giữ Xem trước; các lệnh xuất vẫn dùng trong cửa sổ xem trước.
+  const exportButtons=['excelBtn','pdfBtn','printBtn'].map(id=>$(id)).filter(Boolean);
+  const anchor=exportButtons[0]; if(!anchor)return;
+  exportButtons.forEach(btn=>{btn.style.display='none';btn.setAttribute('aria-hidden','true')});
+  if(document.getElementById('previewBtn'))return;
+  const b=document.createElement('button'); b.type='button'; b.id='previewBtn'; b.className=anchor.className; b.textContent='Xem trước'; b.title='Xem trước Phụ lục 1.4 trước khi xuất'; b.onclick=openOutputPreview;
+  anchor.parentNode.insertBefore(b,anchor);
 }
 function printSchedule(){
-  const d=filterSchedule(); if(!d.length)return alert('Không có dữ liệu để in.');
+  const d=outputScheduleData(); if(!d.length)return alert('Không có dữ liệu để in.');
   if(!lessonPlanMap.size)return alert('Hãy tải Phụ lục 2 trước khi in để có đầy đủ tên bài học.');
-  const holder=document.createElement('div');holder.className='formal-holder print-formal';holder.innerHTML=buildFormalOutput(d);document.body.appendChild(holder);document.body.classList.add('printing-formal');
+  ensureFormalOutputStyles();
+  const holder=document.createElement('div');holder.className='formal-holder print-formal';holder.innerHTML=buildFormalOutput(d);
+  // BƯỚC 4.2-R5: riêng bản In, giữ dòng Tổng số đúng 4 cột của bảng tổng hợp.
+  const printTotalRow=holder.querySelector('.formal-summary tr:last-child');
+  if(printTotalRow){
+    const totalValue=printTotalRow.querySelectorAll('th')[1]?.textContent||String(d.length+getConcurrentPeriods());
+    printTotalRow.innerHTML=`<th></th><th>Tổng số</th><th>${esc(totalValue)}</th><th></th>`;
+  }
+  document.body.appendChild(holder);document.body.classList.add('printing-formal');
   const restore=()=>{document.body.classList.remove('printing-formal');holder.remove();window.removeEventListener('afterprint',restore)};window.addEventListener('afterprint',restore);setTimeout(()=>window.print(),80)
 }
-$('loginBtn')&&($('loginBtn').onclick=openAuthModal); $('logoutBtn')&&($('logoutBtn').onclick=logoutTeacher); initWeekSelect(); initSupabaseConnection(); loadScheduleRepository(); loadSchoolCalendar(); activateSelectedWeek(); $('fileInput').addEventListener('change',e=>e.target.files.length&&readWorkbooks(e.target.files)); $('pl2Input').addEventListener('change',e=>e.target.files[0]&&readLessonPlan(e.target.files[0])); $('weekSelect').addEventListener('change',activateSelectedWeek); $('calendarBtn')&&($('calendarBtn').onclick=openCalendarManager); $('repoBtn')&&($('repoBtn').onclick=openRepoManager); $('appendix2RepoBtn')&&($('appendix2RepoBtn').onclick=openAppendix2RepoManager); $('concurrentPeriods').addEventListener('change',()=>{if(Number($('concurrentPeriods').value)<0)$('concurrentPeriods').value=0}); ['fThu','fBuoi','fPoint','fClass'].forEach(id=>$(id).addEventListener('change',render)); $('tableBtn').onclick=()=>{currentView='table';render()}; $('weekBtn').onclick=()=>{currentView='week';render()}; $('excelBtn').onclick=exportExcel; $('pdfBtn').onclick=exportPDF; $('printBtn').onclick=printSchedule;
+$('loginBtn')&&($('loginBtn').onclick=openAuthModal); $('logoutBtn')&&($('logoutBtn').onclick=logoutTeacher); initWeekSelect(); initSupabaseConnection(); loadScheduleRepository(); loadSchoolCalendar(); activateSelectedWeek(); $('fileInput').addEventListener('change',e=>e.target.files.length&&readWorkbooks(e.target.files)); $('pl2Input').addEventListener('change',e=>e.target.files[0]&&readLessonPlan(e.target.files[0])); $('weekSelect').addEventListener('change',()=>{saveOutputSettings();activateSelectedWeek()}); $('calendarBtn')&&($('calendarBtn').onclick=openCalendarManager); $('repoBtn')&&($('repoBtn').onclick=openRepoManager); $('appendix2RepoBtn')&&($('appendix2RepoBtn').onclick=openAppendix2RepoManager); $('concurrentPeriods').addEventListener('change',()=>{if(Number($('concurrentPeriods').value)<0)$('concurrentPeriods').value=0;saveOutputSettings()}); ['fThu','fBuoi','fPoint','fClass'].forEach(id=>$(id).addEventListener('change',render)); $('tableBtn').onclick=()=>{currentView='table';render()}; $('weekBtn').onclick=()=>{currentView='week';render()}; $('excelBtn').onclick=exportExcel; $('pdfBtn').onclick=exportPDF; $('printBtn').onclick=printSchedule; ensurePreviewButton();
