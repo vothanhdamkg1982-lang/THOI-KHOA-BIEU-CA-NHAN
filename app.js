@@ -786,7 +786,7 @@ function exportExcel(){
   const morningStart=7;
   for(let t=1;t<=maxMorning;t++) rows.push(['Sáng',t,...days.map(day=>excelLessonCellFormal(d,day,'Sáng',t))]);
   const afternoonStart=morningStart+maxMorning;
-  for(let t=1;t<=maxAfternoon;t++) rows.push(['Chiều',t,...days.map(day=>excelLessonCellFormal(d,day,'Chiều',t))]);
+  for(let t=1;t<=maxAfternoon;t++) rows.push(['Chiều',maxMorning+t,...days.map(day=>excelLessonCellFormal(d,day,'Chiều',t))]);
   const totalRow=rows.length+1; rows.push([`Tổng số: ${d.length} tiết`,'','','','','','']);
   rows.push(['TỔNG HỢP','','','','','','']);
   rows.push(['TT','Nội dung','','','Số lượng tiết học','','Ghi chú']);
@@ -900,7 +900,7 @@ function buildFormalOutput(data){
   const subjects=[...new Set(data.map(x=>normalizeSubjectForPlan(x.monHoc)))].filter(Boolean);
   let grid=`<table class="formal-grid"><colgroup><col class="col-session"><col class="col-period">${days.map(()=>'<col class="col-day">').join('')}<col class="col-adjust"></colgroup><thead><tr><th colspan="2">Thời gian</th>${labels.map((l,i)=>`<th>Ngày ${wd.days[i]}<br>${l}</th>`).join('')}<th>Nội dung điều chỉnh</th></tr><tr><th>Buổi</th><th>Tiết</th>${labels.map(l=>`<th>${l}</th>`).join('')}<th></th></tr></thead><tbody>`;
   for(let t=1;t<=morning;t++)grid+=`<tr>${t===1?`<th rowspan="${morning}">Sáng</th>`:''}<th>${t}</th>${days.map(day=>`<td>${formalLessonHtml(data,day,'Sáng',t)}</td>`).join('')}<td></td></tr>`;
-  for(let t=1;t<=afternoon;t++)grid+=`<tr>${t===1?`<th rowspan="${afternoon}">Chiều</th>`:''}<th>${t}</th>${days.map(day=>`<td>${formalLessonHtml(data,day,'Chiều',t)}</td>`).join('')}<td></td></tr>`;
+  for(let t=1;t<=afternoon;t++)grid+=`<tr>${t===1?`<th rowspan="${afternoon}">Chiều</th>`:''}<th>${morning+t}</th>${days.map(day=>`<td>${formalLessonHtml(data,day,'Chiều',t)}</td>`).join('')}<td></td></tr>`;
   grid+=`<tr><th colspan="8">Tổng số: ${data.length} tiết</th></tr></tbody></table>`;
   const concurrent=getConcurrentPeriods();
   const concurrentRow=concurrent>0?`<tr><td>${subjects.length+1}</td><td>Kiêm nhiệm</td><td>${concurrent}</td><td></td></tr>`:'';
@@ -1653,7 +1653,7 @@ async function exportSelectedWeek1To35ToGoogleSheet(){
       {range:`A${leftScheduleStart}`,values:[['Sáng']]},
       {range:`B${leftScheduleStart}:B${leftScheduleStart+3}`,values:[[1],[2],[3],[4]]},
       {range:`A${leftScheduleStart+4}`,values:[['Chiều']]},
-      {range:`B${leftScheduleStart+4}:B${leftScheduleStart+6}`,values:[[1],[2],[3]]}
+      {range:`B${leftScheduleStart+4}:B${leftScheduleStart+6}`,values:[[5],[6],[7]]}
     );
     const payload=weekRows.map(x=>({range:`${q}!${x.range}`,majorDimension:'ROWS',values:x.values}));await gsJson(`${base}/values:batchUpdate`,{method:'POST',headers,body:JSON.stringify({valueInputOption:'USER_ENTERED',data:payload})});
     // BƯỚC 5.2.7: với Tuần 1, tiêu đề tuần nằm ở hàng 5–7, ngoài vùng A8:H29.
