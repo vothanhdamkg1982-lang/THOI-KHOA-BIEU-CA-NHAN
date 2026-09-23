@@ -1054,6 +1054,11 @@ let GOOGLE_SHEETS_TEACHER_NAME='';
 const GOOGLE_SHEETS_SCOPE='https://www.googleapis.com/auth/spreadsheets';
 let googleSheetsTokenClient=null;
 let googleSheetsMappingUserId=null;
+// BƯỚC 5.2.17: chỉ giữ token Google trong RAM của tab hiện tại; không lưu localStorage/Supabase.
+let googleSheetsSessionAccessToken='';
+let googleSheetsSessionTokenExpiresAt=0;
+let googleSheetsSessionTokenUserId=null;
+let googleSheetsTokenPromise=null;
 async function ensureGoogleSheetsTeacherMapping(){
   if(!currentAuthUser?.id)throw new Error('Hãy đăng nhập giáo viên trước khi thao tác Google Sheet.');
   if(googleSheetsMappingUserId===currentAuthUser.id&&GOOGLE_SHEETS_SPREADSHEET_ID&&GOOGLE_SHEETS_TEACHER_NAME&&Number.isFinite(Number(GOOGLE_SHEETS_TEACHER_GID)))return;
@@ -1072,6 +1077,11 @@ function clearGoogleSheetsTeacherMapping(){
   GOOGLE_SHEETS_TEACHER_NAME='';
   GOOGLE_SHEETS_TEACHER_GID=null;
   googleSheetsMappingUserId=null;
+  // Mapping/tài khoản đổi thì token của phiên cũ không được tái sử dụng.
+  googleSheetsSessionAccessToken='';
+  googleSheetsSessionTokenExpiresAt=0;
+  googleSheetsSessionTokenUserId=null;
+  googleSheetsTokenPromise=null;
 }
 function loadGoogleIdentityServices(){
   if(window.google?.accounts?.oauth2)return Promise.resolve();
@@ -1083,11 +1093,33 @@ function loadGoogleIdentityServices(){
 }
 async function getGoogleSheetsReadOnlyToken(){
   await ensureGoogleSheetsTeacherMapping();
+  const uid=currentAuthUser?.id||null,now=Date.now();
+  // Tái sử dụng token còn hiệu lực trong cùng phiên mở Web App. Chừa 60 giây đệm trước khi hết hạn.
+  if(googleSheetsSessionAccessToken&&googleSheetsSessionTokenUserId===uid&&now<googleSheetsSessionTokenExpiresAt-60000){
+    return googleSheetsSessionAccessToken;
+  }
+  // Nếu hai thao tác cùng lúc cần token, dùng chung một yêu cầu OAuth thay vì mở hai popup.
+  if(googleSheetsTokenPromise)return googleSheetsTokenPromise;
   await loadGoogleIdentityServices();
-  return new Promise((resolve,reject)=>{
-    googleSheetsTokenClient=google.accounts.oauth2.initTokenClient({client_id:GOOGLE_SHEETS_CLIENT_ID,scope:GOOGLE_SHEETS_SCOPE,callback:r=>{if(r?.error)return reject(new Error(r.error_description||r.error));if(!r?.access_token)return reject(new Error('Google không trả về access token.'));resolve(r.access_token);}});
+  googleSheetsTokenPromise=new Promise((resolve,reject)=>{
+    googleSheetsTokenClient=google.accounts.oauth2.initTokenClient({
+      client_id:GOOGLE_SHEETS_CLIENT_ID,
+      scope:GOOGLE_SHEETS_SCOPE,
+      callback:r=>{
+        googleSheetsTokenPromise=null;
+        if(r?.error)return reject(new Error(r.error_description||r.error));
+        if(!r?.access_token)return reject(new Error('Google không trả về access token.'));
+        googleSheetsSessionAccessToken=r.access_token;
+        googleSheetsSessionTokenUserId=uid;
+        const expiresIn=Math.max(60,Number(r.expires_in)||3600);
+        googleSheetsSessionTokenExpiresAt=Date.now()+expiresIn*1000;
+        resolve(googleSheetsSessionAccessToken);
+      }
+    });
+    // Chỉ đến đây khi chưa có token phiên hoặc token đã hết hạn.
     googleSheetsTokenClient.requestAccessToken({prompt:'consent'});
   });
+  return googleSheetsTokenPromise;
 }
 function googleSheetNameKey(v){return String(v||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/đ/gi,'d').toLowerCase().replace(/[^a-z0-9]+/g,' ').trim();}
 function googleSheetWeekFromLine(line){
