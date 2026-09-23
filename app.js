@@ -5346,6 +5346,79 @@ async function exportSelectedWeek1To35ToGoogleSheet(options = {}) {
       headers,
       body: JSON.stringify({ valueInputOption: "USER_ENTERED", data: payload }),
     });
+
+    // BƯỚC 5.4.3H - Đồng bộ bộ nhận diện xanh lá/mint đã duyệt sang Google Sheet.
+    // Chỉ định dạng màu/chữ/viền; KHÔNG thay đổi giá trị, merge, kích thước hay cấu trúc dữ liệu.
+    const gsGreen = { red: 11 / 255, green: 122 / 255, blue: 83 / 255 };
+    const gsGreen2 = { red: 25 / 255, green: 145 / 255, blue: 101 / 255 };
+    const gsMint = { red: 232 / 255, green: 245 / 255, blue: 238 / 255 };
+    const gsMint2 = { red: 245 / 255, green: 250 / 255, blue: 247 / 255 };
+    const gsWhite = { red: 1, green: 1, blue: 1 };
+    const gsDark = { red: 18 / 255, green: 52 / 255, blue: 45 / 255 };
+    const greenBorder = { style: "SOLID", color: gsGreen2 };
+    const allGreenBorders = { top: greenBorder, bottom: greenBorder, left: greenBorder, right: greenBorder };
+    const themeReq = [];
+    const addTheme = (r0, r1, c0, c1, fmt, fields) => themeReq.push({
+      repeatCell: {
+        range: { sheetId: GOOGLE_SHEETS_TEACHER_GID, startRowIndex: r0, endRowIndex: r1, startColumnIndex: c0, endColumnIndex: c1 },
+        cell: { userEnteredFormat: fmt },
+        fields,
+      },
+    });
+    const hdr0 = leftHeaderRow - 1, hdr1 = leftSubHeaderRow;
+    // Hai hàng đầu bảng: xanh lá đậm, chữ trắng.
+    addTheme(hdr0, hdr1, 0, 8, {
+      backgroundColor: gsGreen, horizontalAlignment: "CENTER", verticalAlignment: "MIDDLE",
+      textFormat: { bold: true, foregroundColor: gsWhite, fontFamily: "Times New Roman", fontSize: 12 },
+      borders: allGreenBorders, wrapStrategy: "WRAP"
+    }, "userEnteredFormat(backgroundColor,horizontalAlignment,verticalAlignment,textFormat,borders,wrapStrategy)");
+    // Thân lịch: nền trắng/xanh mint xen kẽ, viền xanh dịu.
+    for (let rr = leftScheduleStart - 1; rr < leftScheduleEnd - 1; rr++) {
+      addTheme(rr, rr + 1, 0, 8, {
+        backgroundColor: ((rr - (leftScheduleStart - 1)) % 2) ? gsMint2 : gsWhite,
+        textFormat: { foregroundColor: gsDark, fontFamily: "Times New Roman", fontSize: 12 },
+        borders: allGreenBorders, verticalAlignment: "MIDDLE", wrapStrategy: "WRAP"
+      }, "userEnteredFormat(backgroundColor,textFormat,borders,verticalAlignment,wrapStrategy)");
+    }
+    // Cột Buổi/Tiết dùng xanh mint rõ hơn.
+    addTheme(leftScheduleStart - 1, leftScheduleEnd - 1, 0, 2, {
+      backgroundColor: gsMint, horizontalAlignment: "CENTER", verticalAlignment: "MIDDLE",
+      textFormat: { bold: true, foregroundColor: gsDark, fontFamily: "Times New Roman", fontSize: 12 },
+      borders: allGreenBorders
+    }, "userEnteredFormat(backgroundColor,horizontalAlignment,verticalAlignment,textFormat,borders)");
+    const totalRow0 = specialWeek1 ? 17 : startRow + 11;
+    const summaryTitle0 = totalRow0 + 1;
+    const summaryHeader0 = totalRow0 + 2;
+    const summaryLast0 = specialWeek1 ? 24 : startRow + 18;
+    // Tổng số tiết dạy.
+    addTheme(totalRow0, totalRow0 + 1, 1, 8, {
+      backgroundColor: gsGreen, horizontalAlignment: "CENTER", verticalAlignment: "MIDDLE",
+      textFormat: { bold: true, foregroundColor: gsWhite, fontFamily: "Times New Roman", fontSize: 12 },
+      borders: allGreenBorders
+    }, "userEnteredFormat(backgroundColor,horizontalAlignment,verticalAlignment,textFormat,borders)");
+    // Dòng TỔNG HỢP.
+    addTheme(summaryTitle0, summaryTitle0 + 1, 1, 8, {
+      backgroundColor: gsMint, horizontalAlignment: "CENTER", verticalAlignment: "MIDDLE",
+      textFormat: { bold: true, foregroundColor: gsDark, fontFamily: "Times New Roman", fontSize: 12 }
+    }, "userEnteredFormat(backgroundColor,horizontalAlignment,verticalAlignment,textFormat)");
+    // Header bảng tổng hợp.
+    addTheme(summaryHeader0, summaryHeader0 + 1, 1, 8, {
+      backgroundColor: gsGreen2, horizontalAlignment: "CENTER", verticalAlignment: "MIDDLE",
+      textFormat: { bold: true, foregroundColor: gsWhite, fontFamily: "Times New Roman", fontSize: 12 },
+      borders: allGreenBorders
+    }, "userEnteredFormat(backgroundColor,horizontalAlignment,verticalAlignment,textFormat,borders)");
+    // Nội dung tổng hợp.
+    if (summaryLast0 > summaryHeader0 + 1) addTheme(summaryHeader0 + 1, summaryLast0, 1, 8, {
+      backgroundColor: gsMint2, horizontalAlignment: "CENTER", verticalAlignment: "MIDDLE",
+      textFormat: { foregroundColor: gsDark, fontFamily: "Times New Roman", fontSize: 12 }, borders: allGreenBorders
+    }, "userEnteredFormat(backgroundColor,horizontalAlignment,verticalAlignment,textFormat,borders)");
+    // Dòng Tổng số cuối bảng tổng hợp.
+    addTheme(summaryLast0, summaryLast0 + 1, 1, 8, {
+      backgroundColor: gsGreen2, horizontalAlignment: "CENTER", verticalAlignment: "MIDDLE",
+      textFormat: { bold: true, foregroundColor: gsWhite, fontFamily: "Times New Roman", fontSize: 12 }, borders: allGreenBorders
+    }, "userEnteredFormat(backgroundColor,horizontalAlignment,verticalAlignment,textFormat,borders)");
+    await gsJson(`${base}:batchUpdate`, { method: "POST", headers, body: JSON.stringify({ requests: themeReq }) });
+
     // BƯỚC 5.2.7: với Tuần 1, tiêu đề tuần nằm ở hàng 5–7, ngoài vùng A8:H29.
     // Đọc đúng vùng tiêu đề để xác minh, tránh báo thất bại giả sau khi Google Sheet đã ghi thành công.
     const verifyRange = specialWeek1 ? "A4:H27" : `A${startRow}:H${endRow}`;
