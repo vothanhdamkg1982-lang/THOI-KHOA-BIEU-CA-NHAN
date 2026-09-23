@@ -1513,7 +1513,7 @@ async function exportSelectedWeek1To35ToGoogleSheet(options={}){
     for(const x of data){const slot=`${clean(x.thu)}|${normKey(x.buoi)}|${Number(x.tiet)||0}`;if(slotMap.has(slot)){const a=slotMap.get(slot);throw new Error(`DỪNG GHI: trùng vị trí Thứ ${x.thu} - ${x.buoi} - Tiết ${x.tiet}: ${normalizeSubjectForPlan(a.monHoc)} ${a.lop} và ${normalizeSubjectForPlan(x.monHoc)} ${x.lop}.`);}slotMap.set(slot,x);}
     const noTitle=data.filter(x=>!clean(x.plan?.title));if(noTitle.length)throw new Error(`DỪNG GHI: còn ${noTitle.length} tiết chưa ghép tên bài Phụ lục 2.`);
     if(btn){btn.disabled=true;btn.textContent='Đang kiểm tra...';}
-    const token=await getGoogleSheetsReadOnlyToken(),headers={Authorization:`Bearer ${token}`,'Content-Type':'application/json'},base=`https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(GOOGLE_SHEETS_SPREADSHEET_ID)}`;
+    const token=options.accessToken||await getGoogleSheetsReadOnlyToken(),headers={Authorization:`Bearer ${token}`,'Content-Type':'application/json'},base=`https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(GOOGLE_SHEETS_SPREADSHEET_ID)}`;
     let meta=await gsJson(`${base}?fields=properties.title,sheets.properties(sheetId,title,hidden,gridProperties)`,{headers});
     const teacher=(meta.sheets||[]).find(s=>Number(s?.properties?.sheetId)===GOOGLE_SHEETS_TEACHER_GID);if(!teacher||googleSheetNameKey(teacher.properties.title)!==googleSheetNameKey(GOOGLE_SHEETS_TEACHER_NAME))throw new Error(`DỪNG GHI: không khớp tab ${GOOGLE_SHEETS_TEACHER_NAME} / GID ${GOOGLE_SHEETS_TEACHER_GID}.`);
     const title=teacher.properties.title,q=gsA1Title(title),maxRows=Number(teacher.properties?.gridProperties?.rowCount)||1000;
@@ -1897,11 +1897,16 @@ async function exportSelectedWeeksToGoogleSheet(weeks){
   if(!confirm(`GHI/CẬP NHẬT ${chosen.length} TUẦN vào Google Sheet?\n\n${chosen.map(w=>`Tuần ${w}`).join(', ')}\n\nHệ thống sẽ ghi lần lượt từng tuần vào đúng vùng của tuần đó.`))return;
   const old=btn?.textContent,ok=[],failed=[];
   if(btn)btn.disabled=true;
+  let sharedAccessToken='';
   try{
+    // BƯỚC 5.2.16B: xin quyền Google đúng một lần cho cả lô tuần.
+    // Các tuần sau tái sử dụng cùng access token, tránh Chrome chặn popup OAuth thứ hai.
+    if(btn)btn.textContent='Đang xác thực Google...';
+    sharedAccessToken=await getGoogleSheetsReadOnlyToken();
     for(let i=0;i<chosen.length;i++){
       const week=chosen[i];if(btn)btn.textContent=`Đang ghi ${i+1}/${chosen.length} · Tuần ${week}...`;
       try{
-        const result=await withOutputWeek(week,()=>exportSelectedWeek1To35ToGoogleSheet({week,skipConfirm:true,silentSuccess:true,throwOnError:true,keepButtonBusy:true}));
+        const result=await withOutputWeek(week,()=>exportSelectedWeek1To35ToGoogleSheet({week,accessToken:sharedAccessToken,skipConfirm:true,silentSuccess:true,throwOnError:true,keepButtonBusy:true}));
         if(result===true)ok.push(week);else failed.push({week,error:'Không hoàn tất'});
       }catch(err){failed.push({week,error:err?.message||String(err)});}
     }
