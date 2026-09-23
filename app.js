@@ -1502,8 +1502,7 @@ async function ensureIndependentGoogleSheetTemplate(base,headers,meta){
   return {...p,hidden:true};
 }
 async function exportSelectedWeek1To35ToGoogleSheet(options={}){
-  const silent=!!options.silent,skipConfirm=!!options.skipConfirm;
-  const week=Number($('weekSelect')?.value||0);
+  const week=Number(options.week||$('weekSelect')?.value||0);
   const btn=document.querySelector('#outputPreviewModal .preview-google-write-week1-35'),old=btn?.textContent;
   try{
     if(!Number.isInteger(week)||week<1||week>35)throw new Error('Chỉ hỗ trợ Tuần 1–35.');
@@ -1535,7 +1534,7 @@ async function exportSelectedWeek1To35ToGoogleSheet(options={}){
     const scan=await gsJson(`${base}/values/${encodeURIComponent(q+`!A${startRow}:H${endRow}`)}?majorDimension=ROWS`,{headers});
     const exists=(scan.values||[]).some(r=>googleSheetWeekFromLine((r||[]).join(' '))===week);
     const action=exists?'CẬP NHẬT':'GHI';
-    if(!skipConfirm&&!confirm(`${action} TUẦN ${week} vào tab Võ Thanh Đậm?\n\nVùng dòng ${startRow}–${endRow}. Mẫu định dạng lấy từ tab mẫu ẩn, không phụ thuộc các tuần đang tồn tại.\nTKB tuần này hiện có ${data.length} tiết; tổng kể cả kiêm nhiệm: ${data.length+getConcurrentPeriods()}.`))return {ok:false,cancelled:true,week};
+    if(!options.skipConfirm&&!confirm(`${action} TUẦN ${week} vào tab Võ Thanh Đậm?\n\nVùng dòng ${startRow}–${endRow}. Mẫu định dạng lấy từ tab mẫu ẩn, không phụ thuộc các tuần đang tồn tại.\nTKB tuần này hiện có ${data.length} tiết; tổng kể cả kiêm nhiệm: ${data.length+getConcurrentPeriods()}.`))return false;
     if(btn)btn.textContent=`Đang ${action.toLowerCase()} Tuần ${week}...`;
     const requests=[{unmergeCells:{range:{sheetId:GOOGLE_SHEETS_TEACHER_GID,startRowIndex:d0,endRowIndex:d1,startColumnIndex:0,endColumnIndex:8}}},{copyPaste:{source:{sheetId:templateSheetId,startRowIndex:s0,endRowIndex:s1,startColumnIndex:0,endColumnIndex:8},destination:{sheetId:GOOGLE_SHEETS_TEACHER_GID,startRowIndex:d0,endRowIndex:d1,startColumnIndex:0,endColumnIndex:8},pasteType:'PASTE_NORMAL',pasteOrientation:'NORMAL'}}];
     // BƯỚC 5.2.14C: PASTE_NORMAL đã sao chép cấu trúc merge từ tab mẫu.
@@ -1686,9 +1685,9 @@ async function exportSelectedWeek1To35ToGoogleSheet(options={}){
     const verify=await gsJson(`${base}/values/${encodeURIComponent(q+'!'+verifyRange)}?majorDimension=ROWS`,{headers}),rows=verify.values||[];
     if(!rows.some(r=>googleSheetWeekFromLine((r||[]).join(' '))===week))throw new Error(`Đã gửi lệnh nhưng chưa đọc lại được tiêu đề Tuần ${week}.`);
     const writtenSchedule=(specialWeek1?(rows.slice(6,13)||[]):(rows.slice(5,12)||[])).flat().map(clean).filter(Boolean).join('\n'),expectedTitles=[...new Set(data.map(x=>clean(x.plan?.title||'')).filter(Boolean))],missingTitles=expectedTitles.filter(t=>!writtenSchedule.includes(t));if(missingTitles.length)throw new Error(`Google Sheet còn thiếu tên bài: ${missingTitles.slice(0,3).join(' | ')}.`);
-    if(!silent)alert(`${action} TUẦN ${week} THÀNH CÔNG\n\nVùng: dòng ${startRow}–${endRow}\nSố tiết theo TKB có hiệu lực: ${data.length}\nTổng kể cả kiêm nhiệm: ${data.length+getConcurrentPeriods()}\n\nMẫu định dạng đã độc lập với Tuần 1–35.`);
-    return {ok:true,week,action};
-  }catch(err){console.error(`[TKB] 5.2.2A Tuần ${week}:`,err);if(!silent)alert(`CHƯA GHI ĐƯỢC TUẦN ${week||''}\n\n${err?.message||err}`);return {ok:false,week,error:err?.message||String(err)};}finally{if(btn){btn.disabled=false;btn.textContent=old||`Ghi/Cập nhật Tuần ${week||1} vào Google Sheet`;}}
+    if(!options.silentSuccess)alert(`${action} TUẦN ${week} THÀNH CÔNG\n\nVùng: dòng ${startRow}–${endRow}\nSố tiết theo TKB có hiệu lực: ${data.length}\nTổng kể cả kiêm nhiệm: ${data.length+getConcurrentPeriods()}\n\nMẫu định dạng đã độc lập với Tuần 1–35.`);
+    return true;
+  }catch(err){console.error(`[TKB] 5.2.2A Tuần ${week}:`,err);if(options.throwOnError)throw err;alert(`CHƯA GHI ĐƯỢC TUẦN ${week||''}\n\n${err?.message||err}`);return false;}finally{if(btn&&!options.keepButtonBusy){btn.disabled=false;btn.textContent=old||`Ghi/Cập nhật Tuần ${week||1} vào Google Sheet`;}}
 }
 function ensureGoogleSheetsWeek1To35WriteButton(){
   const bar=document.querySelector('#outputPreviewModal .output-preview-bar>div');if(!bar)return;
@@ -1866,39 +1865,6 @@ function printScheduleWeeks(weeks){
   holder.querySelectorAll('.formal-summary tr:last-child').forEach(row=>{const th=row.querySelectorAll('th'),v=th[2]?.textContent||'';row.innerHTML=`<th></th><th>Tổng số</th><th>${esc(v)}</th><th></th>`});
   document.body.appendChild(holder);document.body.classList.add('printing-formal','multi-print');const restore=()=>{document.body.classList.remove('printing-formal','multi-print');holder.remove();window.removeEventListener('afterprint',restore)};window.addEventListener('afterprint',restore);setTimeout(()=>window.print(),80);
 }
-async function withOutputWeekAsync(week,fn){
-  const sel=$('weekSelect'),oldWeek=sel?.value,oldLessons=allLessons,oldMeta=meta;
-  try{
-    if(sel)sel.value=String(week);
-    const saved=effectiveScheduleForWeek(week);
-    allLessons=saved?[...saved.lessons]:[];meta=saved?{...saved}:{file:'',sheets:[],counts:{},errors:[]};
-    applyLessonPlan();
-    return await fn();
-  }finally{
-    allLessons=oldLessons;meta=oldMeta;if(sel)sel.value=oldWeek;applyLessonPlan();
-  }
-}
-async function exportWeeksToGoogleSheet(weeks){
-  const chosen=normalizeOutputWeeks(weeks);
-  if(!chosen.length)return alert('Hãy chọn ít nhất 1 tuần.');
-  if(chosen.length===1)return withOutputWeekAsync(chosen[0],()=>exportSelectedWeek1To35ToGoogleSheet());
-  const btn=document.querySelector('#outputPreviewModal .preview-google-write-week1-35'),old=btn?.textContent;
-  const label=chosen.length===chosen[chosen.length-1]-chosen[0]+1?`Tuần ${chosen[0]}–${chosen[chosen.length-1]}`:chosen.map(w=>`T${w}`).join(', ');
-  if(!confirm(`GHI/CẬP NHẬT ${chosen.length} TUẦN VÀO GOOGLE SHEET?\n\n${label}\n\nHệ thống sẽ xử lý lần lượt từng tuần. Tuần nào lỗi sẽ được ghi rõ trong kết quả; các tuần ngoài danh sách không bị thay đổi.`))return;
-  const ok=[],failed=[];
-  try{
-    if(btn)btn.disabled=true;
-    for(let i=0;i<chosen.length;i++){
-      const week=chosen[i];if(btn)btn.textContent=`Đang ghi ${i+1}/${chosen.length} · Tuần ${week}...`;
-      const r=await withOutputWeekAsync(week,()=>exportSelectedWeek1To35ToGoogleSheet({silent:true,skipConfirm:true}));
-      if(r?.ok)ok.push(week);else failed.push({week,error:r?.error||'Không ghi được'});
-    }
-    let msg=`HOÀN TẤT GHI/CẬP NHẬT NHIỀU TUẦN\n\nThành công: ${ok.length}/${chosen.length} tuần`;
-    if(ok.length)msg+=`\nTuần đã ghi: ${ok.join(', ')}`;
-    if(failed.length)msg+=`\n\nChưa ghi được (${failed.length}):\n`+failed.map(x=>`• Tuần ${x.week}: ${x.error}`).join('\n');
-    alert(msg);
-  }finally{if(btn){btn.disabled=false;btn.textContent=old||`Ghi/Cập nhật ${chosen.length} tuần vào Google Sheet`;}}
-}
 function enhanceOutputPreviewMultiWeek(){
   const modal=document.getElementById('outputPreviewModal');if(!modal)return;ensureMultiOutputStyles();
   const bar=modal.querySelector('.output-preview-bar>div'),close=bar?.querySelector('.preview-close');if(!bar)return;
@@ -1907,8 +1873,47 @@ function enhanceOutputPreviewMultiWeek(){
   const apply=weeks=>renderMultiWeekPreview(modal,weeks);b.onclick=()=>openMultiWeekPicker(apply);apply(currentOutputWeeks());
   const excel=modal.querySelector('.preview-export-excel'),pdf=modal.querySelector('.preview-export-pdf'),print=modal.querySelector('.preview-print');
   if(excel)excel.onclick=()=>exportExcelWeeks(currentOutputWeeks());if(pdf)pdf.onclick=()=>exportPDFWeeks(currentOutputWeeks());if(print)print.onclick=()=>{const weeks=currentOutputWeeks();modal.remove();printScheduleWeeks(weeks)};
-  const gs=modal.querySelector('.preview-google-write-week1-35');if(gs){const syncGs=()=>{const weeks=currentOutputWeeks();gs.textContent=weeks.length===1?`Ghi/Cập nhật Tuần ${weeks[0]} vào Google Sheet`:`Ghi/Cập nhật ${weeks.length} tuần vào Google Sheet`;gs.title=weeks.length===1?'Ghi/cập nhật tuần đang chọn':'BƯỚC 5.2.16 – ghi/cập nhật lần lượt tất cả tuần đã chọn';};gs.onclick=()=>exportWeeksToGoogleSheet(currentOutputWeeks());const oldApply=apply;apply=weeks=>{renderMultiWeekPreview(modal,weeks);syncGs()};b.onclick=()=>openMultiWeekPicker(apply);syncGs();}
 }
 const openOutputPreviewBeforeMultiWeek=openOutputPreview;
 openOutputPreview=function(){multiOutputWeeks=[Math.max(1,Math.min(35,Number($('weekSelect')?.value||1)))];openOutputPreviewBeforeMultiWeek();enhanceOutputPreviewMultiWeek();};
 const previewBtnMultiWeek=document.getElementById('previewBtn');if(previewBtnMultiWeek)previewBtnMultiWeek.onclick=openOutputPreview;
+
+
+// BƯỚC 5.2.16A - Ghi/Cập nhật nhiều tuần vào Google Sheet.
+// Dùng đúng multiOutputWeeks đã Áp dụng ở Bước 5.2.15; không lấy weekSelect cũ khi đang chọn nhiều tuần.
+function syncMultiWeekGoogleSheetButton(modal=document.getElementById('outputPreviewModal')){
+  const btn=modal?.querySelector('.preview-google-write-week1-35');if(!btn)return;
+  const weeks=currentOutputWeeks();
+  btn.textContent=weeks.length===1?`Ghi/Cập nhật Tuần ${weeks[0]} vào Google Sheet`:`Ghi/Cập nhật ${weeks.length} tuần vào Google Sheet`;
+  btn.title=weeks.length===1?`Ghi/Cập nhật Tuần ${weeks[0]} vào Google Sheet`:`Ghi/Cập nhật các tuần: ${weeks.map(w=>`Tuần ${w}`).join(', ')}`;
+  btn.onclick=()=>exportSelectedWeeksToGoogleSheet(currentOutputWeeks());
+}
+async function exportSelectedWeeksToGoogleSheet(weeks){
+  const chosen=normalizeOutputWeeks(weeks);if(!chosen.length)return alert('Hãy chọn ít nhất 1 tuần.');
+  if(chosen.length===1){
+    return withOutputWeek(chosen[0],()=>exportSelectedWeek1To35ToGoogleSheet({week:chosen[0]}));
+  }
+  const btn=document.querySelector('#outputPreviewModal .preview-google-write-week1-35');
+  if(!confirm(`GHI/CẬP NHẬT ${chosen.length} TUẦN vào Google Sheet?\n\n${chosen.map(w=>`Tuần ${w}`).join(', ')}\n\nHệ thống sẽ ghi lần lượt từng tuần vào đúng vùng của tuần đó.`))return;
+  const old=btn?.textContent,ok=[],failed=[];
+  if(btn)btn.disabled=true;
+  try{
+    for(let i=0;i<chosen.length;i++){
+      const week=chosen[i];if(btn)btn.textContent=`Đang ghi ${i+1}/${chosen.length} · Tuần ${week}...`;
+      try{
+        const result=await withOutputWeek(week,()=>exportSelectedWeek1To35ToGoogleSheet({week,skipConfirm:true,silentSuccess:true,throwOnError:true,keepButtonBusy:true}));
+        if(result===true)ok.push(week);else failed.push({week,error:'Không hoàn tất'});
+      }catch(err){failed.push({week,error:err?.message||String(err)});}
+    }
+  }finally{
+    if(btn){btn.disabled=false;syncMultiWeekGoogleSheetButton();if(!btn.textContent)btn.textContent=old||'Ghi/Cập nhật Google Sheet';}
+  }
+  let msg=`ĐÃ XỬ LÝ ${chosen.length} TUẦN\n\nThành công: ${ok.length}/${chosen.length}`;
+  if(ok.length)msg+=`\nTuần đã cập nhật: ${ok.join(', ')}`;
+  if(failed.length)msg+=`\n\nChưa cập nhật: ${failed.map(x=>`Tuần ${x.week}: ${x.error}`).join('\n')}`;
+  alert(msg);
+}
+const renderMultiWeekPreviewBeforeGoogleMulti=renderMultiWeekPreview;
+renderMultiWeekPreview=function(modal,weeks){renderMultiWeekPreviewBeforeGoogleMulti(modal,weeks);syncMultiWeekGoogleSheetButton(modal);};
+const enhanceOutputPreviewMultiWeekBeforeGoogleMulti=enhanceOutputPreviewMultiWeek;
+enhanceOutputPreviewMultiWeek=function(){enhanceOutputPreviewMultiWeekBeforeGoogleMulti();syncMultiWeekGoogleSheetButton();};
