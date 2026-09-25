@@ -1029,6 +1029,9 @@ async function restoreScheduleRepositoryFromSupabase() {
   // Supabase là nguồn lâu dài sau khi đăng nhập; localStorage được cập nhật lại làm bản dự phòng.
   scheduleVersions.splice(0, scheduleVersions.length, ...restored);
   loadHomeroomTeacherMap();
+  // Điện thoại/thiết bị mới chưa có localStorage GVCN: dựng lại bản đồ trực tiếp
+  // từ các dòng TKB đa giáo viên vừa tải từ Supabase, rồi áp vào toàn bộ phiên TKB.
+  mergeHomeroomTeachersFromSupabaseRows(rows || [], restoredTeachers);
   enrichAllScheduleVersionsWithHomeroom();
   scheduleVersions.sort(
     (a, b) =>
@@ -2695,6 +2698,34 @@ function mergeHomeroomTeachersFromLessons(lessons) {
     const gvcn = clean(x.gvcn);
     if (lop && gvcn && homeroomTeacherMap[lop] !== gvcn) {
       homeroomTeacherMap[lop] = gvcn;
+      changed = true;
+    }
+  }
+  if (changed) saveHomeroomTeacherMap();
+  return changed;
+}
+
+// BƯỚC 5.6.2B.9G.1A — khôi phục GVCN trên thiết bị mới/điện thoại.
+// Trước đây bản đồ Lớp -> GVCN chỉ nằm trong localStorage của máy đã tải Excel,
+// nên khi mở app trên điện thoại Supabase vẫn có TKB nhưng cột GVCN bị trống.
+// Các dòng Supabase đã có teacher_name + source_cell. Theo đúng quy tắc parser:
+// ô TKB KHÔNG ghi tên GV riêng thì người dạy chính là GVCN của lớp.
+function mergeHomeroomTeachersFromSupabaseRows(rows, knownTeachers = []) {
+  let changed = false;
+  for (const r of rows || []) {
+    const lop = normalizeClassName(r?.lop);
+    const teacherName = clean(r?.teacher_name);
+    const sourceCell = clean(r?.source_cell);
+    if (!lop || !teacherName || !sourceCell) continue;
+
+    // Có tên GV ghi riêng trong ô => đây là tiết GV bộ môn, không dùng để suy GVCN.
+    const explicitTeachers = teacherNamesFromCell(sourceCell, knownTeachers);
+    if (explicitTeachers.length) continue;
+
+    // Chỉ dùng các dòng đã thực sự được parser lưu thành tiết học.
+    // teacher_name của dòng không ghi GV riêng chính là GVCN theo quy tắc TKB toàn trường.
+    if (homeroomTeacherMap[lop] !== teacherName) {
+      homeroomTeacherMap[lop] = teacherName;
       changed = true;
     }
   }
