@@ -2992,12 +2992,10 @@ function exportExcel() {
       .filter((x) => normKey(x.buoi) === "sang")
       .map((x) => Number(x.tiet) || 0),
   );
-  const maxAfternoon = Math.max(
-    3,
-    ...d
-      .filter((x) => normKey(x.buoi) === "chieu")
-      .map((x) => Number(x.tiet) || 0),
-  );
+  // BƯỚC 5.6.2B.9E.1D: TKB chính thức chỉ có 7 tiết/ngày.
+  // Buổi chiều luôn gồm đúng Tiết 5–7; không lấy số tiết tuyệt đối (5/6/7)
+  // làm số lượng hàng, vì cách cũ khiến Excel sinh thêm hàng Tiết 8 trở lên.
+  const maxAfternoon = 3;
   const rows = [];
   // Tuần xuất phải lấy trực tiếp từ bộ chọn Tuần 1–35, không suy ra từ tên file TKB.
   // File TKB chỉ quyết định phiên bản lịch có hiệu lực; tuần đang chọn quyết định ngày và Phụ lục 2.
@@ -3039,7 +3037,7 @@ function exportExcel() {
     rows.push([
       "Chiều",
       maxMorning + t,
-      ...days.map((day) => excelLessonCellFormal(d, day, "Chiều", t)),
+      ...days.map((day) => excelLessonCellFormal(d, day, "Chiều", maxMorning + t)),
       "",
     ]);
   const totalRow = rows.length + 1;
