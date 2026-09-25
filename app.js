@@ -851,6 +851,10 @@ async function restoreScheduleRepositoryFromSupabase() {
   (rows || []).forEach((r) => {
     if (!byVersion.has(r.timetable_version_id)) byVersion.set(r.timetable_version_id, []);
     const appRow = supabaseLessonToAppRow(r);
+    // BƯỚC 5.6.2B.9E.1: TKB nguồn mới của trường chỉ có Tiết 1–7.
+    // Không khôi phục các dòng Tiết > 7 còn sót từ parser/phiên cũ trên Supabase.
+    // Nhờ vậy F5 dùng ngay dữ liệu mới nhất mà không làm Tiết 8 cũ xuất hiện lại.
+    if (Number(appRow.tiet) > 7) return;
     const teacherName = clean(r.teacher_name) || TEACHER;
     if (normalizeTeacherName(teacherName) === normalizeTeacherName(TEACHER))
       byVersion.get(r.timetable_version_id).push(appRow);
@@ -882,6 +886,13 @@ async function restoreScheduleRepositoryFromSupabase() {
   );
   saveScheduleRepository();
   activateSelectedWeek();
+  // BƯỚC 5.6.2B.9E.1: sau F5 phải sẵn sàng đúng dữ liệu của GV đang chọn,
+  // không yêu cầu tải lại Excel mới làm mới phạm vi môn/kế hoạch.
+  try {
+    await autoLoadAppendix2ForSelectedTeacher();
+  } catch (autoErr) {
+    console.warn("[TKB] Khôi phục TKB đã xong nhưng chưa tự nạp được kế hoạch theo giáo viên", autoErr);
+  }
   const total = restored.reduce((n, v) => n + v.lessons.length, 0);
   const status = $("supabaseStatus");
   if (status)
@@ -1941,6 +1952,10 @@ function extractTeacherLessons(sheetName, ws, teacherName = selectedTeacher, kno
       if (!belongsToTeacher || breakRow) continue;
       let tiet = resolveTiet(row, r, rows, hm, state),
         mon = extractSubject(src, assignedTeachers);
+      // BƯỚC 5.6.2B.9E.1: theo TKB 28.9 đã chỉnh sửa, lịch chính thức chỉ có Tiết 1–7.
+      // resolveTiet trước đây có thể suy diễn một dòng trống Tiết thành Tiết 8 theo thứ tự thời gian.
+      // Bỏ dòng suy diễn >7 ngay tại parser để lần lưu kế tiếp không ghi lại Tiết 8 giả lên Supabase.
+      if (Number(tiet) > 7) continue;
       let ri = state.lastResolveInfo || {};
       let item = {
         thu,
