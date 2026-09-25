@@ -5440,7 +5440,7 @@ async function exportSelectedWeek1To35ToGoogleSheet(options = {}) {
     if (
       !options.skipConfirm &&
       !confirm(
-        `${action} TUẦN ${week} vào tab Võ Thanh Đậm?\n\nVùng dòng ${startRow}–${endRow}. Mẫu định dạng lấy từ tab mẫu ẩn, không phụ thuộc các tuần đang tồn tại.\nTKB tuần này hiện có ${data.length} tiết; tổng kể cả kiêm nhiệm: ${data.length + getConcurrentPeriods()}.`,
+        `${action} TUẦN ${week} vào tab ${title}?\n\nVùng dòng ${startRow}–${endRow}. Mẫu định dạng lấy từ tab mẫu ẩn, không phụ thuộc các tuần đang tồn tại.\nTKB tuần này hiện có ${data.length} tiết; tổng kể cả kiêm nhiệm: ${data.length + getConcurrentPeriods()}.`,
       )
     )
       return false;
@@ -7494,5 +7494,77 @@ exportSelectedWeek1To35ToGoogleSheet = async function (options = {}) {
     return false;
   } finally {
     excelSharedCurriculumData561B5A = null;
+  }
+};
+
+
+// BƯỚC 5.6.2B.9C.2B - Giáo viên đang chọn ghi đúng tab trong Google Sheet cá nhân đa GV.
+// Đậm tiếp tục dùng Google Sheet công vụ đang Đạt; giáo viên khác dùng file cá nhân thử nghiệm.
+async function ensureMultiTeacherPersonalTemplate562B9C2B(token) {
+  const headers = { Authorization: `Bearer ${token}`, "Content-Type": "application/json" };
+  const personalBase = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(MULTI_TEACHER_TEST_SPREADSHEET_ID)}`;
+  let personalMeta = await gsJson(`${personalBase}?fields=sheets.properties(sheetId,title,hidden)`, { headers });
+  let tpl = (personalMeta.sheets || []).find((s) => googleSheetNameKey(s?.properties?.title) === googleSheetNameKey(GOOGLE_SHEETS_TEMPLATE_NAME));
+  if (tpl?.properties?.sheetId) return tpl.properties;
+
+  // Tạo mẫu một lần từ chính Google Sheet công vụ đã Đạt, không sửa dữ liệu công vụ.
+  const officialSpreadsheetId = GOOGLE_SHEETS_SPREADSHEET_ID;
+  const officialMeta = await gsJson(
+    `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(officialSpreadsheetId)}?fields=sheets.properties(sheetId,title,hidden,gridProperties)`,
+    { headers },
+  );
+  const officialTpl = await ensureIndependentGoogleSheetTemplate(
+    `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(officialSpreadsheetId)}`,
+    headers,
+    officialMeta,
+  );
+  const copied = await gsJson(
+    `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(officialSpreadsheetId)}/sheets/${Number(officialTpl.sheetId)}:copyTo`,
+    { method: "POST", headers, body: JSON.stringify({ destinationSpreadsheetId: MULTI_TEACHER_TEST_SPREADSHEET_ID }) },
+  );
+  const copiedId = Number(copied?.sheetId);
+  if (!Number.isFinite(copiedId)) throw new Error("Không sao chép được mẫu định dạng sang Google Sheet đa giáo viên.");
+  await gsJson(`${personalBase}:batchUpdate`, {
+    method: "POST", headers,
+    body: JSON.stringify({ requests: [{ updateSheetProperties: {
+      properties: { sheetId: copiedId, title: GOOGLE_SHEETS_TEMPLATE_NAME, hidden: true },
+      fields: "title,hidden",
+    } }] }),
+  });
+  return { sheetId: copiedId, title: GOOGLE_SHEETS_TEMPLATE_NAME, hidden: true };
+}
+
+async function multiTeacherPersonalTarget562B9C2B(token, teacherName) {
+  const headers = { Authorization: `Bearer ${token}`, "Content-Type": "application/json" };
+  const base = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(MULTI_TEACHER_TEST_SPREADSHEET_ID)}`;
+  const meta = await gsJson(`${base}?fields=properties.title,sheets.properties(sheetId,title,hidden,gridProperties)`, { headers });
+  const key = googleSheetNameKey(teacherName);
+  const sheet = (meta.sheets || []).find((s) => googleSheetNameKey(s?.properties?.title) === key);
+  if (!sheet?.properties?.sheetId) throw new Error(`Chưa tìm thấy tab giáo viên "${teacherName}" trong Google Sheet đa giáo viên.`);
+  return { spreadsheetId: MULTI_TEACHER_TEST_SPREADSHEET_ID, sheetName: sheet.properties.title, sheetId: Number(sheet.properties.sheetId) };
+}
+
+const exportSelectedWeek1To35ToGoogleSheetBefore562B9C2B = exportSelectedWeek1To35ToGoogleSheet;
+exportSelectedWeek1To35ToGoogleSheet = async function (options = {}) {
+  const teacherName = clean(selectedTeacher || TEACHER);
+  const isDam = normalizeTeacherName(teacherName) === normalizeTeacherName(TEACHER);
+  if (isDam) return exportSelectedWeek1To35ToGoogleSheetBefore562B9C2B(options);
+
+  // Xin/nhận token trước; cùng token được chuyển xuống hàm ghi để không bật OAuth lần hai.
+  const token = options.accessToken || (await getGoogleSheetsReadOnlyToken());
+  const oldSpreadsheetId = GOOGLE_SHEETS_SPREADSHEET_ID;
+  const oldTeacherName = GOOGLE_SHEETS_TEACHER_NAME;
+  const oldTeacherGid = GOOGLE_SHEETS_TEACHER_GID;
+  try {
+    await ensureMultiTeacherPersonalTemplate562B9C2B(token);
+    const target = await multiTeacherPersonalTarget562B9C2B(token, teacherName);
+    GOOGLE_SHEETS_SPREADSHEET_ID = target.spreadsheetId;
+    GOOGLE_SHEETS_TEACHER_NAME = target.sheetName;
+    GOOGLE_SHEETS_TEACHER_GID = target.sheetId;
+    return await exportSelectedWeek1To35ToGoogleSheetBefore562B9C2B({ ...options, accessToken: token });
+  } finally {
+    GOOGLE_SHEETS_SPREADSHEET_ID = oldSpreadsheetId;
+    GOOGLE_SHEETS_TEACHER_NAME = oldTeacherName;
+    GOOGLE_SHEETS_TEACHER_GID = oldTeacherGid;
   }
 };
