@@ -7854,3 +7854,192 @@ resetGoogleSheetWeekRange=async function(firstWeek,lastWeek){
   alert(`LÀM MỚI THÀNH CÔNG\n\nTab: ${target.sheetName}\nVùng đã làm sạch: A${r1.startRow}:H${r2.endRow}.`);
   return true;
 };
+
+// BƯỚC 5.6.2B.9E.3 - Google Sheet đa GV dùng CHÍNH XÁC cùng nguồn dữ liệu với Preview/Excel đã Đạt.
+// Mục tiêu: giáo viên khác Đậm Ghi/Cập nhật và Làm mới đúng tab, đúng tuần, đúng Tiết 1–7.
+// Luồng Google Sheet công vụ của Đậm giữ nguyên hoàn toàn.
+async function multiGsPreviewData9E3(week) {
+  return await withOutputWeekAsync561B4B(week, async () => {
+    const data = validFormalOutputData561B7B(await sharedCurriculumPreviewData());
+    return data.filter((x) => isOfficialOutputPeriod(x));
+  });
+}
+function multiGsLessonText9E3(data, day, displayPeriod) {
+  return (Array.isArray(data) ? data : [])
+    .filter((x) => x.thu === day && outputDisplayPeriod(x) === Number(displayPeriod))
+    .map((x) => {
+      const sub = normalizeSubjectForPlan(x.monHoc),
+        title = clean(x.plan?.title),
+        pt = x.plan?.annualPeriod || x.plan?.week || x.planWeek || "";
+      const lesson = title ? ` Tiết ${pt} - ${title}` : "";
+      return `${sub} ${clean(x.lop)}${lesson}`.trim();
+    })
+    .join("\n");
+}
+function multiGsRows9E3(data, week) {
+  const rows = Array.from({ length: MULTI_GS_BLOCK_ROWS_569D4 }, () => Array(8).fill(""));
+  const wd = multiGsWeekDates569D4(week), dayKeys = ["Hai", "Ba", "Tư", "Năm", "Sáu"];
+  rows[0][0] = `PHỤ LỤC 1.4`;
+  rows[1][0] = `Hoạt động giáo dục tuần ${week}`;
+  rows[2][0] = `Năm học 2026 – 2027. ${formalSubjectGradeText(data)}, Trường TH – THCS & THPT Lại Sơn`;
+  rows[3] = ["Thời gian", "", `Ngày ${wd.days[0]}\nThứ hai`, `Ngày ${wd.days[1]}\nThứ ba`, `Ngày ${wd.days[2]}\nThứ tư`, `Ngày ${wd.days[3]}\nThứ năm`, `Ngày ${wd.days[4]}\nThứ sáu`, "Nội dung\nđiều chỉnh"];
+  rows[4] = ["Buổi", "Tiết", "", "", "", "", "", ""];
+  for (let p = 1; p <= 7; p++) {
+    const r = 4 + p;
+    rows[r][0] = p === 1 ? "Sáng" : p === 5 ? "Chiều" : "";
+    rows[r][1] = p;
+    dayKeys.forEach((day, i) => {
+      rows[r][2 + i] = multiGsLessonText9E3(data, day, p);
+    });
+  }
+  rows[12][0] = `Tổng số: ${data.length} tiết`;
+  rows[13][0] = "TỔNG HỢP";
+  rows[14] = ["TT", "Nội dung", "", "", "Số lượng tiết học", "", "Ghi chú", ""];
+  const subjects = [...new Set(data.map((x) => normalizeSubjectForPlan(x.monHoc)).filter(Boolean))];
+  const concurrent = getConcurrentPeriods();
+  if (subjects.length + (concurrent > 0 ? 1 : 0) > 16)
+    throw new Error("TỔNG HỢP có quá nhiều nội dung cho khối tuần Google Sheet.");
+  let r = 15;
+  subjects.forEach((sub, i) => {
+    rows[r][0] = i + 1;
+    rows[r][1] = sub;
+    rows[r][4] = data.filter((x) => normalizeSubjectForPlan(x.monHoc) === sub).length;
+    r++;
+  });
+  if (concurrent > 0) {
+    rows[r][0] = r - 14;
+    rows[r][1] = "Kiêm nhiệm";
+    rows[r][4] = concurrent;
+  }
+  rows[31][1] = "Tổng số";
+  rows[31][4] = data.length + concurrent;
+  rows[33][4] = formalSignatureDate(wd);
+  rows[34][0] = "P. HIỆU TRƯỞNG";
+  rows[34][2] = "TỔ TRƯỞNG";
+  rows[34][5] = "NGƯỜI LẬP KẾ HOẠCH";
+  rows[35][5] = outputTeacherDisplayName();
+  return { rows, wd, subjects, concurrent };
+}
+function multiGsFormatRequests9E3(sheetId, startRow, endRow) {
+  const req = [
+    { unmergeCells: { range: { sheetId, startRowIndex: startRow - 1, endRowIndex: endRow, startColumnIndex: 0, endColumnIndex: 8 } } },
+    { repeatCell: { range: { sheetId, startRowIndex: startRow - 1, endRowIndex: endRow, startColumnIndex: 0, endColumnIndex: 8 }, cell: { userEnteredFormat: {} }, fields: "userEnteredFormat" } },
+    { updateCells: { range: { sheetId, startRowIndex: startRow - 1, endRowIndex: endRow, startColumnIndex: 0, endColumnIndex: 8 }, rows: [], fields: "note,dataValidation" } },
+  ];
+  const merge = (r0, r1, c0, c1) => req.push({ mergeCells: { range: { sheetId, startRowIndex: startRow - 1 + r0, endRowIndex: startRow - 1 + r1, startColumnIndex: c0, endColumnIndex: c1 }, mergeType: "MERGE_ALL" } });
+  merge(0, 1, 0, 8); merge(1, 2, 0, 8); merge(2, 3, 0, 8);
+  merge(3, 4, 0, 2);
+  for (let c = 2; c < 8; c++) merge(3, 5, c, c + 1);
+  merge(5, 9, 0, 1); // Sáng 1–4
+  merge(9, 12, 0, 1); // Chiều 5–7
+  merge(12, 13, 0, 8); // Tổng số tiết
+  merge(13, 14, 0, 8); // TỔNG HỢP
+  merge(14, 15, 1, 4); merge(14, 15, 4, 6); merge(14, 15, 6, 8);
+  for (let rr = 15; rr < 31; rr++) {
+    merge(rr, rr + 1, 1, 4); merge(rr, rr + 1, 4, 6); merge(rr, rr + 1, 6, 8);
+  }
+  merge(31, 32, 1, 4); merge(31, 32, 4, 6); merge(31, 32, 6, 8);
+  merge(33, 34, 4, 8);
+  merge(34, 35, 0, 2); merge(34, 35, 2, 5); merge(34, 35, 5, 8); merge(35, 36, 5, 8);
+
+  const all = { sheetId, startRowIndex: startRow - 1, endRowIndex: endRow, startColumnIndex: 0, endColumnIndex: 8 };
+  const border = { style: "SOLID", color: { red: 0.043, green: 0.478, blue: 0.325 } };
+  req.push({ repeatCell: { range: all, cell: { userEnteredFormat: { textFormat: { fontFamily: "Times New Roman", fontSize: 12 }, horizontalAlignment: "CENTER", verticalAlignment: "MIDDLE", wrapStrategy: "WRAP" } }, fields: "userEnteredFormat(textFormat,horizontalAlignment,verticalAlignment,wrapStrategy)" } });
+  req.push({ repeatCell: { range: { sheetId, startRowIndex: startRow - 1 + 3, endRowIndex: startRow - 1 + 13, startColumnIndex: 0, endColumnIndex: 8 }, cell: { userEnteredFormat: { borders: { top: border, bottom: border, left: border, right: border } } }, fields: "userEnteredFormat.borders" } });
+  req.push({ repeatCell: { range: { sheetId, startRowIndex: startRow - 1 + 14, endRowIndex: startRow - 1 + 32, startColumnIndex: 0, endColumnIndex: 8 }, cell: { userEnteredFormat: { borders: { top: border, bottom: border, left: border, right: border } } }, fields: "userEnteredFormat.borders" } });
+  req.push({ repeatCell: { range: { sheetId, startRowIndex: startRow - 1 + 5, endRowIndex: startRow - 1 + 12, startColumnIndex: 2, endColumnIndex: 8 }, cell: { userEnteredFormat: { horizontalAlignment: "LEFT" } }, fields: "userEnteredFormat.horizontalAlignment" } });
+  const green = { red: 0.043, green: 0.478, blue: 0.325 }, mint = { red: 0.918, green: 0.969, blue: 0.937 }, white = { red: 1, green: 1, blue: 1 };
+  [3, 4, 12, 14, 31].forEach((rr) => req.push({ repeatCell: { range: { sheetId, startRowIndex: startRow - 1 + rr, endRowIndex: startRow + rr, startColumnIndex: 0, endColumnIndex: 8 }, cell: { userEnteredFormat: { backgroundColor: green, textFormat: { bold: true, foregroundColor: white, fontFamily: "Times New Roman", fontSize: 12 } } }, fields: "userEnteredFormat(backgroundColor,textFormat)" } }));
+  req.push({ repeatCell: { range: { sheetId, startRowIndex: startRow - 1 + 5, endRowIndex: startRow - 1 + 12, startColumnIndex: 0, endColumnIndex: 8 }, cell: { userEnteredFormat: { backgroundColor: mint } }, fields: "userEnteredFormat.backgroundColor" } });
+  req.push({ repeatCell: { range: { sheetId, startRowIndex: startRow - 1 + 15, endRowIndex: startRow - 1 + 31, startColumnIndex: 0, endColumnIndex: 8 }, cell: { userEnteredFormat: { backgroundColor: mint } }, fields: "userEnteredFormat.backgroundColor" } });
+  return req;
+}
+async function writeMultiTeacherGoogleSheet9E3(options = {}) {
+  const week = Number(options.week || $("weekSelect")?.value || 0);
+  if (!Number.isInteger(week) || week < 1 || week > 35) throw new Error("Chỉ hỗ trợ Tuần 1–35.");
+  const teacherName = clean(selectedTeacher || TEACHER);
+  const btn = document.querySelector("#outputPreviewModal .preview-google-write-week1-35"), old = btn?.textContent;
+  try {
+    if (btn && !options.keepButtonBusy) { btn.disabled = true; btn.textContent = `Đang chuẩn bị Tuần ${week}...`; }
+    const data = await multiGsPreviewData9E3(week);
+    if (!data.length) throw new Error(`Tuần ${week} không có tiết dạy hợp lệ để ghi.`);
+    const missingTitles = data.filter((x) => !clean(x.plan?.title) && !isOptionalPracticeSubject(x.monHoc));
+    if (missingTitles.length) throw new Error(`DỪNG GHI: còn ${missingTitles.length} tiết chưa có tên bài từ PPCT chung.`);
+    const token = options.accessToken || await getGoogleSheetsReadOnlyToken();
+    const target = await multiTeacherPersonalTarget562B9C2B(token, teacherName);
+    const headers = { Authorization: `Bearer ${token}`, "Content-Type": "application/json" };
+    const base = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(target.spreadsheetId)}`;
+    const meta = await gsJson(`${base}?fields=sheets.properties(sheetId,title,gridProperties)`, { headers });
+    const sh = (meta.sheets || []).find((s) => Number(s?.properties?.sheetId) === Number(target.sheetId));
+    if (!sh) throw new Error(`Không tìm thấy tab ${target.sheetName}.`);
+    const needed = MULTI_GS_FIRST_ROW_569D4 + 35 * MULTI_GS_BLOCK_ROWS_569D4;
+    const rowCount = Number(sh?.properties?.gridProperties?.rowCount) || 0;
+    if (rowCount < needed) await gsJson(`${base}:batchUpdate`, { method: "POST", headers, body: JSON.stringify({ requests: [{ appendDimension: { sheetId: target.sheetId, dimension: "ROWS", length: needed - rowCount } }] }) });
+    const { startRow, endRow } = multiGsWeekRange569D4(week), q = gsA1Title(target.sheetName);
+    const existing = await gsJson(`${base}/values/${encodeURIComponent(q + `!A${startRow}:H${endRow}`)}?majorDimension=ROWS`, { headers });
+    const action = (existing.values || []).some((row) => (row || []).some((v) => clean(v))) ? "CẬP NHẬT" : "GHI";
+    const built = multiGsRows9E3(data, week);
+    if (!options.skipConfirm && !confirm(`${action} TUẦN ${week} vào tab ${target.sheetName}?\n\nDữ liệu lấy trực tiếp từ bản Xem trước đang ĐẠT.\nTiết dạy: ${data.length}; Kiêm nhiệm: ${built.concurrent}; Tổng: ${data.length + built.concurrent}.\nVùng: A${startRow}:H${endRow}.`)) return false;
+    if (btn) btn.textContent = `${action === "GHI" ? "Đang ghi" : "Đang cập nhật"} Tuần ${week}...`;
+    await gsJson(`${base}/values/${encodeURIComponent(q + `!A${startRow}:H${endRow}`)}:clear`, { method: "POST", headers, body: "{}" });
+    await gsJson(`${base}:batchUpdate`, { method: "POST", headers, body: JSON.stringify({ requests: multiGsFormatRequests9E3(target.sheetId, startRow, endRow) }) });
+    await gsJson(`${base}/values/${encodeURIComponent(q + `!A${startRow}:H${endRow}`)}?valueInputOption=USER_ENTERED`, { method: "PUT", headers, body: JSON.stringify({ range: `${q}!A${startRow}:H${endRow}`, majorDimension: "ROWS", values: built.rows }) });
+    const verify = await gsJson(`${base}/values/${encodeURIComponent(q + `!A${startRow}:H${endRow}`)}?majorDimension=ROWS`, { headers });
+    const vv = verify.values || [];
+    const totalText = clean(vv?.[12]?.[0]);
+    const totalValue = Number(vv?.[31]?.[4]);
+    if (!totalText.includes(String(data.length)) || totalValue !== data.length + built.concurrent)
+      throw new Error(`Google Sheet đã nhận lệnh nhưng kiểm tra lại chưa khớp tổng số (${data.length} / ${data.length + built.concurrent}).`);
+    if (!options.silentSuccess) alert(`${action} TUẦN ${week} THÀNH CÔNG\n\nTab: ${target.sheetName}\nTiết dạy: ${data.length}\nKiêm nhiệm: ${built.concurrent}\nTổng: ${data.length + built.concurrent}\n\nDữ liệu Google Sheet đã được đối chiếu lại sau khi ghi.`);
+    return true;
+  } catch (err) {
+    console.error("[TKB] 5.6.2B.9E.3 Ghi/Cập nhật Google Sheet đa GV:", err);
+    if (options.throwOnError) throw err;
+    alert(`CHƯA GHI/CẬP NHẬT ĐƯỢC GOOGLE SHEET\n\n${err?.message || err}`);
+    return false;
+  } finally {
+    if (btn && !options.keepButtonBusy) { btn.disabled = false; btn.textContent = old || `Ghi/Cập nhật Tuần ${week} vào Google Sheet`; }
+  }
+}
+async function resetMultiTeacherGoogleSheet9E3(firstWeek, lastWeek) {
+  const from = Math.max(1, Math.min(35, Number(firstWeek) || 1)), to = Math.max(from, Math.min(35, Number(lastWeek) || from));
+  const teacherName = clean(selectedTeacher || TEACHER), btn = document.querySelector("#outputPreviewModal .preview-google-reset-weeks"), old = btn?.textContent;
+  try {
+    if (btn) { btn.disabled = true; btn.textContent = "Đang kiểm tra..."; }
+    const token = await getGoogleSheetsReadOnlyToken(), target = await multiTeacherPersonalTarget562B9C2B(token, teacherName);
+    const headers = { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, base = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(target.spreadsheetId)}`, q = gsA1Title(target.sheetName);
+    const r1 = multiGsWeekRange569D4(from), r2 = multiGsWeekRange569D4(to), label = from === to ? `Tuần ${from}` : `Tuần ${from}–${to}`;
+    if (!confirm(`LÀM MỚI ${label} trên tab ${target.sheetName}?\n\nChỉ vùng A${r1.startRow}:H${r2.endRow} được xóa.\nCác tuần ngoài phạm vi và các tab giáo viên khác được giữ nguyên.`)) return false;
+    if (btn) btn.textContent = `Đang làm mới ${label}...`;
+    await gsJson(`${base}/values/${encodeURIComponent(q + `!A${r1.startRow}:H${r2.endRow}`)}:clear`, { method: "POST", headers, body: "{}" });
+    await gsJson(`${base}:batchUpdate`, { method: "POST", headers, body: JSON.stringify({ requests: [
+      { unmergeCells: { range: { sheetId: target.sheetId, startRowIndex: r1.startRow - 1, endRowIndex: r2.endRow, startColumnIndex: 0, endColumnIndex: 8 } } },
+      { repeatCell: { range: { sheetId: target.sheetId, startRowIndex: r1.startRow - 1, endRowIndex: r2.endRow, startColumnIndex: 0, endColumnIndex: 8 }, cell: { userEnteredFormat: {} }, fields: "userEnteredFormat" } },
+      { updateCells: { range: { sheetId: target.sheetId, startRowIndex: r1.startRow - 1, endRowIndex: r2.endRow, startColumnIndex: 0, endColumnIndex: 8 }, rows: [], fields: "note,dataValidation" } }
+    ] }) });
+    const verify = await gsJson(`${base}/values/${encodeURIComponent(q + `!A${r1.startRow}:H${r2.endRow}`)}?majorDimension=ROWS`, { headers });
+    const remain = [];
+    (verify.values || []).forEach((row, i) => { if ((row || []).some((v) => clean(v))) remain.push(r1.startRow + i); });
+    if (remain.length) throw new Error(`Vẫn còn dữ liệu tại dòng ${remain.slice(0, 5).join(", ")}.`);
+    alert(`LÀM MỚI ${label.toUpperCase()} THÀNH CÔNG\n\nTab: ${target.sheetName}\nVùng đã làm sạch: A${r1.startRow}:H${r2.endRow}.\nCác tuần và giáo viên khác được giữ nguyên.`);
+    return true;
+  } catch (err) {
+    console.error("[TKB] 5.6.2B.9E.3 Làm mới Google Sheet đa GV:", err);
+    alert(`CHƯA LÀM MỚI ĐƯỢC GOOGLE SHEET\n\n${err?.message || err}`);
+    return false;
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = old || "Làm mới"; }
+  }
+}
+const exportSelectedWeek1To35ToGoogleSheetBefore9E3 = exportSelectedWeek1To35ToGoogleSheet;
+exportSelectedWeek1To35ToGoogleSheet = async function (options = {}) {
+  const teacherName = clean(selectedTeacher || TEACHER), isDam = normalizeTeacherName(teacherName) === normalizeTeacherName(TEACHER);
+  if (isDam) return exportSelectedWeek1To35ToGoogleSheetBefore9E3(options);
+  return await writeMultiTeacherGoogleSheet9E3(options);
+};
+const resetGoogleSheetWeekRangeBefore9E3 = resetGoogleSheetWeekRange;
+resetGoogleSheetWeekRange = async function (firstWeek, lastWeek) {
+  const teacherName = clean(selectedTeacher || TEACHER), isDam = normalizeTeacherName(teacherName) === normalizeTeacherName(TEACHER);
+  if (isDam) return resetGoogleSheetWeekRangeBefore9E3(firstWeek, lastWeek);
+  return await resetMultiTeacherGoogleSheet9E3(firstWeek, lastWeek);
+};
