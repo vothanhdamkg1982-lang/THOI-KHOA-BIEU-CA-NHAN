@@ -5548,6 +5548,45 @@ async function exportSelectedWeek1To35ToGoogleSheet(options = {}) {
     const leftScheduleEnd = leftScheduleStart + (multiTeacherSheet ? 8 : 7);
     // BƯỚC 5.2.14C: giữ nguyên merge A:B đã được copy từ tab mẫu; chỉ áp lại định dạng và ghi nhãn bên dưới.
     const leftReq = [
+      // BƯỚC 5.6.2B.9D.2: với Google Sheet đa giáo viên, hàng Tiết 8 phải là
+      // một hàng lịch thật (A=Chiều, B=8, C:H là các ngày), không kế thừa merge
+      // B:H của dòng “Tổng số” trong mẫu 7 tiết của Đậm.
+      ...(multiTeacherSheet ? [
+        {
+          unmergeCells: {
+            range: {
+              sheetId: GOOGLE_SHEETS_TEACHER_GID,
+              startRowIndex: leftScheduleStart + 3,
+              endRowIndex: leftScheduleStart + 8,
+              startColumnIndex: 0,
+              endColumnIndex: 1,
+            },
+          },
+        },
+        {
+          unmergeCells: {
+            range: {
+              sheetId: GOOGLE_SHEETS_TEACHER_GID,
+              startRowIndex: leftScheduleStart + 6,
+              endRowIndex: leftScheduleStart + 7,
+              startColumnIndex: 1,
+              endColumnIndex: 8,
+            },
+          },
+        },
+        {
+          mergeCells: {
+            range: {
+              sheetId: GOOGLE_SHEETS_TEACHER_GID,
+              startRowIndex: leftScheduleStart + 3,
+              endRowIndex: leftScheduleStart + 7,
+              startColumnIndex: 0,
+              endColumnIndex: 1,
+            },
+            mergeType: "MERGE_ALL",
+          },
+        },
+      ] : []),
       {
         repeatCell: {
           range: {
