@@ -4588,33 +4588,27 @@ function gsWeekRows(data, week, startRow) {
       )
       .map(lessonText)
       .join("\n────────\n");
-  const classify = (x) => {
-    const k = normKey(
-      normalizeSubjectForPlan(x?.monHoc || x?.plan?.subject || ""),
-    ).replace(/[^a-z0-9]+/g, "");
-    if (k === "cn" || k === "cnghe" || k.includes("congnghe"))
-      return "Công nghệ";
-    if (k === "th" || k.includes("tinhoc")) return "Tin học";
-    if (k === "dd" || k.includes("daoduc")) return "Đạo đức";
-    return "";
-  };
-  const counts = { "Công nghệ": 0, "Tin học": 0, "Đạo đức": 0 };
+  // BƯỚC 5.6.2B.9C.2C: không phân loại lại theo 3 môn của Đậm.
+  // Dữ liệu ở đây đã là chính các tiết PPCT hợp lệ đang hiển thị trên Preview.
+  // Với giáo viên khác, gom môn động; do mẫu Google Sheet cố định 4 dòng tổng hợp,
+  // nhiều môn được trình bày gọn trong một dòng "Giảng dạy" nhưng vẫn giữ đủ tổng tiết.
+  const dynamicCounts = new Map();
   data.forEach((x) => {
-    const k = classify(x);
-    if (k) counts[k]++;
+    const subject = clean(normalizeSubjectForPlan(x?.monHoc || x?.plan?.subject || "")) || "Môn học";
+    dynamicCounts.set(subject, (dynamicCounts.get(subject) || 0) + 1);
   });
-  const teachingTotal =
-    counts["Công nghệ"] + counts["Tin học"] + counts["Đạo đức"];
-  if (teachingTotal !== data.length)
-    throw new Error(
-      `Không thể tổng hợp đủ ${data.length} tiết Tuần ${week}. Đã nhận diện ${teachingTotal} tiết.`,
-    );
-  const details = [
-    ["Phòng máy", concurrent],
-    ["Công nghệ", counts["Công nghệ"]],
-    ["Tin học", counts["Tin học"]],
-    ["Đạo đức", counts["Đạo đức"]],
-  ];
+  const isDamSheet = normalizeTeacherName(clean(selectedTeacher || TEACHER)) === normalizeTeacherName(TEACHER);
+  let details;
+  if (isDamSheet) {
+    const countOf = (name) => [...dynamicCounts.entries()].reduce((n, [k, v]) => {
+      const a = normKey(k).replace(/[^a-z0-9]+/g, ""), b = normKey(name).replace(/[^a-z0-9]+/g, "");
+      return n + ((a === b || a.includes(b) || b.includes(a)) ? v : 0);
+    }, 0);
+    details = [["Phòng máy", concurrent], ["Công nghệ", countOf("Công nghệ")], ["Tin học", countOf("Tin học")], ["Đạo đức", countOf("Đạo đức")]];
+  } else {
+    const subjectText = [...dynamicCounts.entries()].map(([k,v]) => `${k}: ${v}`).join("; ");
+    details = [[subjectText || "Giảng dạy", data.length], ["Kiêm nhiệm", concurrent], ["", ""], ["", ""]];
+  }
   const r = (n) => startRow + n,
     values = [];
   values.push({
@@ -5993,12 +5987,19 @@ async function exportSelectedWeek1To35ToGoogleSheet(options = {}) {
         },
         {
           range: "B21:H24",
-          values: [
-            [1, "Tin học", "", counts["Tin học"], "", "", ""],
-            [2, "Công nghệ", "", counts["Công nghệ"], "", "", ""],
-            [3, "Kiêm nhiệm", "", concurrent, "", "", ""],
-            [4, "Đạo đức", "", counts["Đạo đức"], "", "", ""],
-          ],
+          values: normalizeTeacherName(clean(selectedTeacher || TEACHER)) === normalizeTeacherName(TEACHER)
+            ? [
+                [1, "Tin học", "", counts["Tin học"], "", "", ""],
+                [2, "Công nghệ", "", counts["Công nghệ"], "", "", ""],
+                [3, "Kiêm nhiệm", "", concurrent, "", "", ""],
+                [4, "Đạo đức", "", counts["Đạo đức"], "", "", ""],
+              ]
+            : (() => {
+                const m = new Map();
+                data.forEach((x) => { const k = clean(normalizeSubjectForPlan(x?.monHoc || x?.plan?.subject || "")) || "Môn học"; m.set(k, (m.get(k) || 0) + 1); });
+                const label = [...m.entries()].map(([k,v]) => `${k}: ${v}`).join("; ");
+                return [[1, label || "Giảng dạy", "", data.length, "", "", ""], [2, "Kiêm nhiệm", "", concurrent, "", "", ""], ["", "", "", "", "", "", ""], ["", "", "", "", "", "", ""]];
+              })(),
         },
         {
           range: "B25:H25",
@@ -6035,12 +6036,19 @@ async function exportSelectedWeek1To35ToGoogleSheet(options = {}) {
         },
         {
           range: `B${r(15)}:H${r(18)}`,
-          values: [
-            [1, "Tin học", "", counts["Tin học"], "", "", ""],
-            [2, "Công nghệ", "", counts["Công nghệ"], "", "", ""],
-            [3, "Kiêm nhiệm", "", concurrent, "", "", ""],
-            [4, "Đạo đức", "", counts["Đạo đức"], "", "", ""],
-          ],
+          values: normalizeTeacherName(clean(selectedTeacher || TEACHER)) === normalizeTeacherName(TEACHER)
+            ? [
+                [1, "Tin học", "", counts["Tin học"], "", "", ""],
+                [2, "Công nghệ", "", counts["Công nghệ"], "", "", ""],
+                [3, "Kiêm nhiệm", "", concurrent, "", "", ""],
+                [4, "Đạo đức", "", counts["Đạo đức"], "", "", ""],
+              ]
+            : (() => {
+                const m = new Map();
+                data.forEach((x) => { const k = clean(normalizeSubjectForPlan(x?.monHoc || x?.plan?.subject || "")) || "Môn học"; m.set(k, (m.get(k) || 0) + 1); });
+                const label = [...m.entries()].map(([k,v]) => `${k}: ${v}`).join("; ");
+                return [[1, label || "Giảng dạy", "", data.length, "", "", ""], [2, "Kiêm nhiệm", "", concurrent, "", "", ""], ["", "", "", "", "", "", ""], ["", "", "", "", "", "", ""]];
+              })(),
         },
         {
           range: `B${r(19)}:H${r(19)}`,
@@ -7498,6 +7506,7 @@ exportSelectedWeek1To35ToGoogleSheet = async function (options = {}) {
 };
 
 
+// BƯỚC 5.6.2B.9C.2C - Google Sheet đa GV dùng trực tiếp toàn bộ tiết PPCT đã hiển thị trên Preview; không nhận diện lại theo 3 môn của Đậm.
 // BƯỚC 5.6.2B.9C.2B - Giáo viên đang chọn ghi đúng tab trong Google Sheet cá nhân đa GV.
 // Đậm tiếp tục dùng Google Sheet công vụ đang Đạt; giáo viên khác dùng file cá nhân thử nghiệm.
 async function ensureMultiTeacherPersonalTemplate562B9C2B(token) {
