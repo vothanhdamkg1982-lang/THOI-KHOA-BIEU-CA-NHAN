@@ -5545,48 +5545,9 @@ async function exportSelectedWeek1To35ToGoogleSheet(options = {}) {
     const leftHeaderRow = specialWeek1 ? 8 : startRow + 3;
     const leftSubHeaderRow = leftHeaderRow + 1;
     const leftScheduleStart = leftHeaderRow + 2;
-    const leftScheduleEnd = leftScheduleStart + (multiTeacherSheet ? 8 : 7);
+    const leftScheduleEnd = leftScheduleStart + 7;
     // BƯỚC 5.2.14C: giữ nguyên merge A:B đã được copy từ tab mẫu; chỉ áp lại định dạng và ghi nhãn bên dưới.
     const leftReq = [
-      // BƯỚC 5.6.2B.9D.2: với Google Sheet đa giáo viên, hàng Tiết 8 phải là
-      // một hàng lịch thật (A=Chiều, B=8, C:H là các ngày), không kế thừa merge
-      // B:H của dòng “Tổng số” trong mẫu 7 tiết của Đậm.
-      ...(multiTeacherSheet ? [
-        {
-          unmergeCells: {
-            range: {
-              sheetId: GOOGLE_SHEETS_TEACHER_GID,
-              startRowIndex: leftScheduleStart + 3,
-              endRowIndex: leftScheduleStart + 8,
-              startColumnIndex: 0,
-              endColumnIndex: 1,
-            },
-          },
-        },
-        {
-          unmergeCells: {
-            range: {
-              sheetId: GOOGLE_SHEETS_TEACHER_GID,
-              startRowIndex: leftScheduleStart + 6,
-              endRowIndex: leftScheduleStart + 7,
-              startColumnIndex: 1,
-              endColumnIndex: 8,
-            },
-          },
-        },
-        {
-          mergeCells: {
-            range: {
-              sheetId: GOOGLE_SHEETS_TEACHER_GID,
-              startRowIndex: leftScheduleStart + 3,
-              endRowIndex: leftScheduleStart + 7,
-              startColumnIndex: 0,
-              endColumnIndex: 1,
-            },
-            mergeType: "MERGE_ALL",
-          },
-        },
-      ] : []),
       {
         repeatCell: {
           range: {
@@ -6014,7 +5975,7 @@ async function exportSelectedWeek1To35ToGoogleSheet(options = {}) {
       // phần Tổng số/TỔNG HỢP sẽ dựng chuẩn riêng ở hàng 18–25 bên dưới.
       weekRows = weekRows.filter((x) => {
         const m = String(x.range).match(/^[A-Z]+(\d+)/);
-        return !m || Number(m[1]) < (multiTeacherSheet ? 19 : 18);
+        return !m || Number(m[1]) < 18;
       });
       weekRows.unshift({
         range: "B6",
@@ -6036,16 +5997,16 @@ async function exportSelectedWeek1To35ToGoogleSheet(options = {}) {
       });
       const concurrent = getConcurrentPeriods();
       weekRows.push(
-        { range: multiTeacherSheet ? "B19" : "B18", values: [[`Tổng số: ${data.length} tiết`]] },
-        { range: multiTeacherSheet ? "B20" : "B19", values: [["TỔNG HỢP"]] },
+        { range: "B18", values: [[`Tổng số: ${data.length} tiết`]] },
+        { range: "B19", values: [["TỔNG HỢP"]] },
         {
-          range: multiTeacherSheet ? "B21:H21" : "B20:H20",
+          range: "B20:H20",
           values: [
             ["TT", "Nội dung", "", "Số lượng tiết học", "Ghi chú", "", ""],
           ],
         },
         {
-          range: multiTeacherSheet ? "B22:H25" : "B21:H24",
+          range: "B21:H24",
           values: normalizeTeacherName(clean(selectedTeacher || TEACHER)) === normalizeTeacherName(TEACHER)
             ? [
                 [1, "Tin học", "", counts["Tin học"], "", "", ""],
@@ -6063,7 +6024,7 @@ async function exportSelectedWeek1To35ToGoogleSheet(options = {}) {
               })(),
         },
         {
-          range: multiTeacherSheet ? "B26:H26" : "B25:H25",
+          range: "B25:H25",
           values: [["", "Tổng số", "", data.length + concurrent, "", "", ""]],
         },
       );
@@ -6081,8 +6042,8 @@ async function exportSelectedWeek1To35ToGoogleSheet(options = {}) {
       });
       const concurrent = getConcurrentPeriods(),
         r = (n) => startRow + n,
-        summaryShift = multiTeacherSheet ? 1 : 0;
-      // Đa giáo viên có thêm Tiết 8 nên phần Tổng hợp dịch xuống 1 dòng, vẫn nằm gọn trong khối 22 dòng.
+        summaryShift = 0;
+      // Google Sheet dùng thống nhất 7 tiết/ngày; phần Tổng hợp giữ đúng cấu trúc mẫu 22 dòng/tuần.
       weekRows = weekRows.filter((x) => {
         const m = String(x.range).match(/^[A-Z]+(\d+)/);
         return !m || Number(m[1]) < r(12 + summaryShift);
@@ -6140,8 +6101,8 @@ async function exportSelectedWeek1To35ToGoogleSheet(options = {}) {
       },
       { range: `A${leftScheduleStart + 4}`, values: [["Chiều"]] },
       {
-        range: `B${leftScheduleStart + 4}:B${leftScheduleStart + (multiTeacherSheet ? 7 : 6)}`,
-        values: multiTeacherSheet ? [[5], [6], [7], [8]] : [[5], [6], [7]],
+        range: `B${leftScheduleStart + 4}:B${leftScheduleStart + 6}`,
+        values: [[5], [6], [7]],
       },
     );
     const payload = weekRows.map((x) => ({
@@ -6251,10 +6212,10 @@ async function exportSelectedWeek1To35ToGoogleSheet(options = {}) {
       },
       "userEnteredFormat.backgroundColorStyle,userEnteredFormat.horizontalAlignment,userEnteredFormat.verticalAlignment,userEnteredFormat.textFormat,userEnteredFormat.borders",
     );
-    const totalRow0 = (specialWeek1 ? 17 : startRow + 11) + (multiTeacherSheet ? 1 : 0);
+    const totalRow0 = specialWeek1 ? 17 : startRow + 11;
     const summaryTitle0 = totalRow0 + 1;
     const summaryHeader0 = totalRow0 + 2;
-    const summaryLast0 = (specialWeek1 ? 24 : startRow + 18) + (multiTeacherSheet ? 1 : 0);
+    const summaryLast0 = specialWeek1 ? 24 : startRow + 18;
     // Tổng số tiết dạy.
     addTheme(
       totalRow0,
@@ -7689,4 +7650,4 @@ resetGoogleSheetWeekRange = async function(firstWeek, lastWeek) {
   }
 };
 
-// BƯỚC 5.6.2B.9C.2D.2 - Google Sheet đa GV: hỗ trợ Tiết 8; Tổng hợp hiển thị từng môn trên từng dòng trong ô, số tiết tương ứng; Đậm giữ nguyên.
+// BƯỚC 5.6.2B.9D.3 - Google Sheet đa GV: thống nhất 7 tiết/ngày theo TKB 28.9(4); bỏ Tiết 8, giữ Tổng hợp đúng cấu trúc 22 dòng/tuần; Đậm giữ nguyên.
