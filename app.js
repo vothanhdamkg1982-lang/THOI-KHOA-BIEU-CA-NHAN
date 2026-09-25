@@ -595,63 +595,167 @@ function curriculumSubjectMatches(subject, subjectCode) {
 }
 // BƯỚC 5.6.2B.4 - Kho PPCT chung chỉ cấp tên bài cho cửa sổ Xem trước.
 // Không ghi đè lessonPlanMap/Phụ lục 2 và chưa thay dữ liệu của Excel/PDF/In/Google Sheet.
+// BƯỚC 5.6.2B.9F.1 - Ghép PPCT theo ĐÚNG THỨ TỰ TIẾT TRONG TUẦN + số tiết lũy kế 35 tuần.
+// Quy tắc mã môn trong kho:
+//   Toán 1..5  => tiết thứ 1..5 của Toán trong tuần.
+//   Khoa học 1..2 => tiết thứ 1..2 của Khoa học trong tuần.
+//   Tiếng Việt 1..9, 0, A, B => tiết thứ 1..12 của Tiếng Việt trong tuần
+//     (0 = tiết thứ 10, A = 11, B = 12).
+// Mỗi LỚP được ghép độc lập. Không dùng rows.find() để lấy dòng đầu tiên rồi lặp cho cả tuần.
+// Số "Tiết N" hiển thị trước tên bài là số thứ tự LŨY KẾ của chính môn đó trong 35 tuần.
+function curriculumSlotOrder(subjectCode) {
+  const m = clean(subjectCode).match(/\s+([0-9]+|[A-Z])$/iu);
+  if (!m) return 999;
+  const token = String(m[1] || '').toUpperCase();
+  if (token === '0') return 10; // quy ước Tiếng Việt: 0 = tiết thứ 10 trong tuần
+  if (/^[1-9][0-9]*$/.test(token)) return Number(token);
+  if (/^[A-Z]$/.test(token)) return 11 + (token.charCodeAt(0) - 'A'.charCodeAt(0));
+  return 999;
+}
+function curriculumGroupKey(subject, grade) {
+  return `${Number(grade) || 0}|${curriculumSubjectKey(subject)}`;
+}
+function curriculumRowGroupKey(row) {
+  return curriculumGroupKey(curriculumBaseSubject(row?.subject_code), row?.grade);
+}
+function curriculumClassKey(lop) {
+  return normKey(clean(lop)).replace(/[^a-z0-9]+/g, '');
+}
+function sortCurriculumRows(rows) {
+  return [...(rows || [])].sort((a, b) =>
+    Number(a.week || 0) - Number(b.week || 0) ||
+    curriculumSlotOrder(a.subject_code) - curriculumSlotOrder(b.subject_code) ||
+    Number(a.ppct || 0) - Number(b.ppct || 0) ||
+    clean(a.subject_code).localeCompare(clean(b.subject_code), 'vi')
+  );
+}
+async function fetchSharedCurriculumRowsUpToWeek(week, grades) {
+  if (!supabaseClient) throw new Error('Supabase chưa sẵn sàng.');
+  const out = [];
+  const pageSize = 1000;
+  for (let from = 0; ; from += pageSize) {
+    let q = supabaseClient
+      .from('tkb_curriculum')
+      .select('week,ppct,subject_code,grade,lesson_name,stem')
+      .lte('week', Number(week))
+      .order('grade', { ascending: true })
+      .order('week', { ascending: true })
+      .order('subject_code', { ascending: true })
+      .range(from, from + pageSize - 1);
+    if (grades?.length) q = q.in('grade', grades);
+    const { data, error } = await q;
+    if (error) throw error;
+    const batch = data || [];
+    out.push(...batch);
+    if (batch.length < pageSize) break;
+    if (from > 10000) throw new Error('Kho PPCT có quá nhiều dòng, không thể đọc an toàn.');
+  }
+  return out;
+}
+function annotateCurriculumAnnualPeriods(rows) {
+  const groups = new Map();
+  for (const r of rows || []) {
+    const key = curriculumRowGroupKey(r);
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(r);
+  }
+  for (const list of groups.values()) {
+    sortCurriculumRows(list).forEach((r, i) => { r.__annualPeriod = i + 1; });
+  }
+  return rows;
+}
 async function sharedCurriculumPreviewData() {
-  const week = Number($("weekSelect")?.value || 1);
-  const source = filterSchedule();
-  if (!source.length) return [];
-  if (!supabaseClient) throw new Error("Supabase chưa sẵn sàng.");
-  const grades = [...new Set(source.map((x) => gradeFromClass(x.lop)).filter(Boolean))];
-  let q = supabaseClient
-    .from("tkb_curriculum")
-    .select("week,ppct,subject_code,grade,lesson_name,stem")
-    .eq("week", week)
-    .order("grade", { ascending: true })
-    .order("subject_code", { ascending: true })
-    .order("ppct", { ascending: true });
-  if (grades.length) q = q.in("grade", grades);
-  const { data, error } = await q;
-  if (error) throw error;
-  const rows = data || [];
+  const week = Number($('weekSelect')?.value || 1);
+  const visibleSource = filterSchedule();
+  if (!visibleSource.length) return [];
+
+  // Ghép thứ tự dựa trên TOÀN BỘ TKB tuần của GV đang xem, không dựa vào bộ lọc màn hình.
+  // Nhờ vậy nếu người dùng lọc Thứ/Buổi/Lớp thì số thứ tự bài vẫn không bị xê dịch.
+  const fullSource = sortSchedule(
+    (allLessons || [])
+      .filter((x) => isValidOutputSubject(x?.monHoc))
+      .filter((x) => isOfficialOutputPeriod(x)),
+  );
   const edits = loadOutputEdits();
-  return source.map((x) => {
-    const e = edits[outputLessonId(x)];
-    if (e?.deleted) return null;
-    const y = { ...x };
+  const visibleIds = new Set(visibleSource.map((x) => outputLessonId(x)));
+  const prepared = [];
+  for (const x of fullSource) {
+    const sourceId = outputLessonId(x);
+    const e = edits[sourceId] || {};
+    const y = { ...x, __sourceOutputId: sourceId, __outputDeleted: !!e.deleted };
     if (e?.monHoc !== undefined) y.monHoc = e.monHoc;
     if (e?.lop !== undefined) y.lop = e.lop;
+    prepared.push(y);
+  }
+
+  const grades = [...new Set(prepared.map((x) => gradeFromClass(x.lop)).filter(Boolean))];
+  const rows = annotateCurriculumAnnualPeriods(await fetchSharedCurriculumRowsUpToWeek(week, grades));
+
+  // Lấy các dòng của đúng tuần và xếp theo hậu tố mã môn (1,2,...9,0,A,B).
+  const weekRowsByGroup = new Map();
+  for (const r of rows) {
+    if (Number(r.week) !== week) continue;
+    const key = curriculumRowGroupKey(r);
+    if (!weekRowsByGroup.has(key)) weekRowsByGroup.set(key, []);
+    weekRowsByGroup.get(key).push(r);
+  }
+  for (const [key, list] of weekRowsByGroup) weekRowsByGroup.set(key, sortCurriculumRows(list));
+
+  // Đếm thứ tự tiết theo Môn + Khối + LỚP. Mỗi lớp bắt đầu lại từ tiết thứ 1 của tuần.
+  const occurrenceByClassSubject = new Map();
+  const mapped = prepared.map((y) => {
     const grade = gradeFromClass(y.lop);
-    const hit = rows.find(
-      (r) => Number(r.grade) === Number(grade) && curriculumSubjectMatches(y.monHoc, r.subject_code),
-    );
+    const subjectKey = curriculumSubjectKey(y.monHoc);
+    const rowGroup = curriculumGroupKey(y.monHoc, grade);
+    const occurrenceKey = `${rowGroup}|${curriculumClassKey(y.lop)}`;
+    const occurrence = occurrenceByClassSubject.get(occurrenceKey) || 0;
+    occurrenceByClassSubject.set(occurrenceKey, occurrence + 1);
+
+    const slots = weekRowsByGroup.get(rowGroup) || [];
+    const hit = slots[occurrence] || null;
     const curriculumPlan = hit
       ? {
           subject: curriculumBaseSubject(hit.subject_code),
           grade,
           week,
-          annualPeriod: hit.ppct ?? "",
+          // Không dùng PPCT=Tuần làm số tiết nữa. Đây là số tiết lũy kế thật của môn trong 35 tuần.
+          annualPeriod: Number(hit.__annualPeriod) || '',
           title: clean(hit.lesson_name),
-          duration: "",
+          duration: '',
           integration: clean(hit.stem),
-          note: "",
-          source: "Kho PPCT chung",
+          note: '',
+          source: 'Kho PPCT chung',
+          subjectCode: clean(hit.subject_code),
+          weeklySlot: curriculumSlotOrder(hit.subject_code),
         }
       : null;
-    // Điều chỉnh thủ công trong Xem trước vẫn có quyền ưu tiên cao nhất.
+
+    const e = edits[y.__sourceOutputId] || {};
+    // Điều chỉnh thủ công trong Xem trước vẫn ưu tiên cao nhất, nhưng giữ đúng số tiết lũy kế đã ghép.
     if (e?.title !== undefined) {
       y.plan = {
         ...(curriculumPlan || {}),
         title: e.title,
-        annualPeriod: e.annualPeriod !== undefined ? e.annualPeriod : curriculumPlan?.annualPeriod || "",
+        annualPeriod: e.annualPeriod !== undefined ? e.annualPeriod : curriculumPlan?.annualPeriod || '',
         week,
         subject: normalizeSubjectForPlan(y.monHoc),
         grade,
       };
-    } else y.plan = curriculumPlan;
+    } else {
+      y.plan = curriculumPlan;
+    }
     y.planWeek = week;
     y.planSubject = normalizeSubjectForPlan(y.monHoc);
     y.planGrade = grade;
+    y.curriculumOccurrence = occurrence + 1;
+    y.curriculumExpectedCount = slots.length;
+    y.curriculumMatched = !!hit;
     return y;
-  }).filter(Boolean);
+  });
+
+  // Chỉ trả các tiết đang thuộc phạm vi Xem trước, sau khi đã tính thứ tự trên toàn tuần.
+  // Tiết bị xóa thủ công không hiển thị nhưng KHÔNG làm các tiết sau bị dồn sai thứ tự PPCT.
+  return mapped.filter((y) => !y.__outputDeleted && visibleIds.has(y.__sourceOutputId));
 }
 
 async function probeSharedCurriculum() {
