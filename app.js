@@ -8043,3 +8043,312 @@ resetGoogleSheetWeekRange = async function (firstWeek, lastWeek) {
   if (isDam) return resetGoogleSheetWeekRangeBefore9E3(firstWeek, lastWeek);
   return await resetMultiTeacherGoogleSheet9E3(firstWeek, lastWeek);
 };
+
+// BƯỚC 5.6.2B.9E.4 - ỔN ĐỊNH GOOGLE SHEET ĐA GIÁO VIÊN.
+// Gốc lỗi đã xác định:
+// 1) Sheet thử nghiệm cũ dùng 22 dòng/tuần (Tuần 5 ở dòng 96–117), trong khi cấu trúc mới dùng 36 dòng/tuần
+//    (Tuần 5 ở dòng 152–187). Vì vậy Làm mới/Ghi mới có thể tác động vùng khác, còn dữ liệu cũ vẫn nằm nguyên.
+// 2) Token Google trước đây dùng chung giữa Sheet công vụ và Sheet Gmail cá nhân. Khi đổi tài khoản Google,
+//    giáo viên khác có thể không có quyền ghi vào file cá nhân dù Đậm vẫn ghi được file công vụ.
+// 3) Không được xem hai tiết là trùng chỉ vì tên bài giống nhau. Chỉ loại bản ghi trùng hoàn toàn cùng vị trí + lớp + môn;
+//    nếu cùng một vị trí có hai tiết khác nhau thì dừng để báo dữ liệu nguồn xung đột.
+// Luồng Google Sheet công vụ của Đậm giữ nguyên hoàn toàn.
+const MULTI_GS_LAYOUT_MARKER_9E4 = "__TKB_MULTI_GS_V2_36__";
+const MULTI_GS_LAYOUT_MARKER_CELL_9E4 = "L1";
+let multiGsPersonalAccessToken9E4 = "";
+let multiGsPersonalTokenExpiresAt9E4 = 0;
+let multiGsPersonalTokenPromise9E4 = null;
+
+function clearMultiGsPersonalToken9E4() {
+  multiGsPersonalAccessToken9E4 = "";
+  multiGsPersonalTokenExpiresAt9E4 = 0;
+  multiGsPersonalTokenPromise9E4 = null;
+}
+
+async function getMultiGsPersonalToken9E4(forceAccountChoice = false) {
+  const now = Date.now();
+  if (!forceAccountChoice && multiGsPersonalAccessToken9E4 && now < multiGsPersonalTokenExpiresAt9E4 - 60000) {
+    return multiGsPersonalAccessToken9E4;
+  }
+  if (multiGsPersonalTokenPromise9E4) return multiGsPersonalTokenPromise9E4;
+  await loadGoogleIdentityServices();
+  multiGsPersonalTokenPromise9E4 = new Promise((resolve, reject) => {
+    const client = google.accounts.oauth2.initTokenClient({
+      client_id: GOOGLE_SHEETS_CLIENT_ID,
+      scope: GOOGLE_SHEETS_SCOPE,
+      callback: (r) => {
+        multiGsPersonalTokenPromise9E4 = null;
+        if (r?.error) return reject(new Error(r.error_description || r.error));
+        if (!r?.access_token) return reject(new Error("Google không trả về access token cho Sheet cá nhân."));
+        multiGsPersonalAccessToken9E4 = r.access_token;
+        const expiresIn = Math.max(60, Number(r.expires_in) || 3600);
+        multiGsPersonalTokenExpiresAt9E4 = Date.now() + expiresIn * 1000;
+        resolve(multiGsPersonalAccessToken9E4);
+      },
+    });
+    // Sheet đa giáo viên nằm trên Gmail cá nhân, tách khỏi tài khoản công vụ của Đậm.
+    // Lần đầu mỗi phiên luôn cho chọn đúng tài khoản; sau đó tái sử dụng token trong phiên.
+    client.requestAccessToken({ prompt: forceAccountChoice || !multiGsPersonalAccessToken9E4 ? "select_account" : "" });
+  });
+  return multiGsPersonalTokenPromise9E4;
+}
+
+async function multiGsPersonalContext9E4(teacherName, forceAccountChoice = false) {
+  let token = await getMultiGsPersonalToken9E4(forceAccountChoice);
+  let target;
+  try {
+    target = await multiTeacherPersonalTarget562B9C2B(token, teacherName);
+  } catch (err) {
+    // Nếu token đang thuộc tài khoản Google khác, cho chọn lại đúng Gmail cá nhân một lần.
+    const msg = String(err?.message || err || "").toLowerCase();
+    if (!forceAccountChoice && /permission|not found|không tìm thấy|requested entity|403|404|forbidden|denied/.test(msg)) {
+      clearMultiGsPersonalToken9E4();
+      token = await getMultiGsPersonalToken9E4(true);
+      target = await multiTeacherPersonalTarget562B9C2B(token, teacherName);
+    } else throw err;
+  }
+  const headers = { Authorization: `Bearer ${token}`, "Content-Type": "application/json" };
+  const base = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(target.spreadsheetId)}`;
+  const q = gsA1Title(target.sheetName);
+  let meta = await gsJson(`${base}?fields=sheets.properties(sheetId,title,gridProperties)`, { headers });
+  let sh = (meta.sheets || []).find((s) => Number(s?.properties?.sheetId) === Number(target.sheetId));
+  if (!sh) throw new Error(`Không tìm thấy tab ${target.sheetName}.`);
+  const neededRows = MULTI_GS_FIRST_ROW_569D4 + 35 * MULTI_GS_BLOCK_ROWS_569D4;
+  const rowCount = Number(sh?.properties?.gridProperties?.rowCount) || 0;
+  const colCount = Number(sh?.properties?.gridProperties?.columnCount) || 0;
+  const grow = [];
+  if (rowCount < neededRows) grow.push({ appendDimension: { sheetId: target.sheetId, dimension: "ROWS", length: neededRows - rowCount } });
+  if (colCount < 12) grow.push({ appendDimension: { sheetId: target.sheetId, dimension: "COLUMNS", length: 12 - colCount } });
+  if (grow.length) {
+    await gsJson(`${base}:batchUpdate`, { method: "POST", headers, body: JSON.stringify({ requests: grow }) });
+    meta = await gsJson(`${base}?fields=sheets.properties(sheetId,title,gridProperties)`, { headers });
+    sh = (meta.sheets || []).find((s) => Number(s?.properties?.sheetId) === Number(target.sheetId));
+  }
+  return { token, target, headers, base, q, sh };
+}
+
+async function ensureMultiGsLayout9E4(ctx, { allowPrompt = true } = {}) {
+  const { target, headers, base, q, sh } = ctx;
+  const markerRead = await gsJson(`${base}/values/${encodeURIComponent(q + `!${MULTI_GS_LAYOUT_MARKER_CELL_9E4}`)}`, { headers });
+  const marker = clean(markerRead?.values?.[0]?.[0]);
+  if (marker === MULTI_GS_LAYOUT_MARKER_9E4) return { migrated: false };
+
+  const rowCount = Math.max(Number(sh?.properties?.gridProperties?.rowCount) || 0, MULTI_GS_FIRST_ROW_569D4 + 35 * MULTI_GS_BLOCK_ROWS_569D4);
+  const legacyProbe = await gsJson(`${base}/values/${encodeURIComponent(q + `!A8:H${Math.min(rowCount, 1400)}`)}?majorDimension=ROWS`, { headers });
+  const hasOldData = (legacyProbe.values || []).some((row) => (row || []).some((v) => clean(v)));
+  if (hasOldData && allowPrompt) {
+    const ok = confirm(
+      `CHUYỂN TAB ${target.sheetName} SANG CẤU TRÚC GOOGLE SHEET MỚI?\n\n` +
+      `Tab này còn dữ liệu theo cấu trúc cũ 22 dòng/tuần. Cấu trúc mới dùng 36 dòng/tuần để TỔNG HỢP mỗi môn một dòng.\n\n` +
+      `Nếu tiếp tục, app sẽ XÓA TOÀN BỘ dữ liệu kế hoạch cũ trong A8:H${rowCount} của riêng tab ${target.sheetName}, ` +
+      `sau đó từ nay Ghi/Cập nhật và Làm mới sẽ dùng đúng một cấu trúc mới, không còn chồng vùng tuần.\n\n` +
+      `Các tab giáo viên khác và Google Sheet công vụ của Đậm không bị ảnh hưởng.`
+    );
+    if (!ok) throw new Error("Đã hủy chuyển cấu trúc Google Sheet đa giáo viên.");
+  }
+
+  // Xóa sạch vùng kế hoạch cũ của CHÍNH tab này một lần để chấm dứt chồng lấn 22/36 dòng.
+  await gsJson(`${base}/values/${encodeURIComponent(q + `!A8:H${rowCount}`)}:clear`, { method: "POST", headers, body: "{}" });
+  await gsJson(`${base}:batchUpdate`, {
+    method: "POST", headers,
+    body: JSON.stringify({ requests: [
+      { unmergeCells: { range: { sheetId: target.sheetId, startRowIndex: 7, endRowIndex: rowCount, startColumnIndex: 0, endColumnIndex: 8 } } },
+      { repeatCell: { range: { sheetId: target.sheetId, startRowIndex: 7, endRowIndex: rowCount, startColumnIndex: 0, endColumnIndex: 8 }, cell: { userEnteredFormat: {} }, fields: "userEnteredFormat" } },
+      { updateCells: { range: { sheetId: target.sheetId, startRowIndex: 7, endRowIndex: rowCount, startColumnIndex: 0, endColumnIndex: 8 }, rows: [], fields: "note,dataValidation" } },
+      { updateDimensionProperties: { range: { sheetId: target.sheetId, dimension: "COLUMNS", startIndex: 11, endIndex: 12 }, properties: { hiddenByUser: true }, fields: "hiddenByUser" } },
+    ] }),
+  });
+  await gsJson(`${base}/values/${encodeURIComponent(q + `!L1`)}?valueInputOption=RAW`, {
+    method: "PUT", headers,
+    body: JSON.stringify({ range: `${q}!L1`, majorDimension: "ROWS", values: [[MULTI_GS_LAYOUT_MARKER_9E4]] }),
+  });
+  return { migrated: true };
+}
+
+async function multiGsPreviewData9E4(week) {
+  const raw = await withOutputWeekAsync561B4B(week, async () =>
+    validFormalOutputData561B7B(await sharedCurriculumPreviewData()).filter((x) => isOfficialOutputPeriod(x)),
+  );
+  const exact = new Set();
+  const slotMap = new Map();
+  const out = [];
+  for (const x of raw) {
+    const p = outputDisplayPeriod(x);
+    const day = clean(x.thu);
+    const subject = normalizeSubjectForPlan(x.monHoc);
+    const cls = clean(x.lop);
+    const slot = `${normKey(day)}|${p}`;
+    const identity = `${slot}|${normKey(cls)}|${normKey(subject)}`;
+    // Chỉ loại trùng hoàn toàn; KHÔNG dùng tên bài để xác định trùng.
+    if (exact.has(identity)) continue;
+    exact.add(identity);
+    if (slotMap.has(slot) && slotMap.get(slot) !== identity) {
+      const a = out.find((y) => `${normKey(clean(y.thu))}|${outputDisplayPeriod(y)}` === slot);
+      throw new Error(
+        `DỪNG GHI: trùng vị trí Thứ ${day} - Tiết ${p}: ` +
+        `${normalizeSubjectForPlan(a?.monHoc)} ${clean(a?.lop)} và ${subject} ${cls}. Hãy kiểm tra TKB nguồn.`
+      );
+    }
+    slotMap.set(slot, identity);
+    out.push(x);
+  }
+  return out;
+}
+
+function multiGsRows9E4(data, week) {
+  // Dùng đúng cấu trúc 36 dòng đã thống nhất; không đọc lại dữ liệu từ Google Sheet cũ.
+  return multiGsRows9E3(data, week);
+}
+
+async function writeMultiTeacherGoogleSheet9E4(options = {}) {
+  const week = Number(options.week || $("weekSelect")?.value || 0);
+  if (!Number.isInteger(week) || week < 1 || week > 35) throw new Error("Chỉ hỗ trợ Tuần 1–35.");
+  const teacherName = clean(selectedTeacher || TEACHER);
+  const btn = document.querySelector("#outputPreviewModal .preview-google-write-week1-35"), old = btn?.textContent;
+  try {
+    if (btn && !options.keepButtonBusy) { btn.disabled = true; btn.textContent = `Đang chuẩn bị Tuần ${week}...`; }
+    const data = await multiGsPreviewData9E4(week);
+    if (!data.length) throw new Error(`Tuần ${week} không có tiết dạy hợp lệ để ghi.`);
+    const missingTitles = data.filter((x) => !clean(x.plan?.title) && !isOptionalPracticeSubject(x.monHoc));
+    if (missingTitles.length) throw new Error(`DỪNG GHI: còn ${missingTitles.length} tiết chưa có tên bài từ PPCT chung.`);
+
+    // Luôn dùng token RIÊNG của Gmail cá nhân, không nhận accessToken chung từ luồng công vụ.
+    const ctx = await multiGsPersonalContext9E4(teacherName);
+    const mig = await ensureMultiGsLayout9E4(ctx, { allowPrompt: !options.skipConfirm });
+    const { target, headers, base, q } = ctx;
+    const { startRow, endRow } = multiGsWeekRange569D4(week);
+    const existing = await gsJson(`${base}/values/${encodeURIComponent(q + `!A${startRow}:H${endRow}`)}?majorDimension=ROWS`, { headers });
+    const action = (existing.values || []).some((row) => (row || []).some((v) => clean(v))) ? "CẬP NHẬT" : "GHI";
+    const built = multiGsRows9E4(data, week);
+    if (!options.skipConfirm && !confirm(
+      `${action} TUẦN ${week} vào tab ${target.sheetName}?\n\n` +
+      `Nguồn: chính dữ liệu Xem trước đang ĐẠT.\nTiết dạy: ${data.length}; Kiêm nhiệm: ${built.concurrent}; Tổng: ${data.length + built.concurrent}.\n` +
+      `Vùng mới: A${startRow}:H${endRow}.${mig.migrated ? "\n\nTab vừa được chuyển khỏi cấu trúc cũ; dữ liệu cũ đã được xóa sạch." : ""}`
+    )) return false;
+
+    if (btn) btn.textContent = `${action === "GHI" ? "Đang ghi" : "Đang cập nhật"} Tuần ${week}...`;
+    await gsJson(`${base}/values/${encodeURIComponent(q + `!A${startRow}:H${endRow}`)}:clear`, { method: "POST", headers, body: "{}" });
+    await gsJson(`${base}:batchUpdate`, { method: "POST", headers, body: JSON.stringify({ requests: multiGsFormatRequests9E3(target.sheetId, startRow, endRow) }) });
+    await gsJson(`${base}/values/${encodeURIComponent(q + `!A${startRow}:H${endRow}`)}?valueInputOption=USER_ENTERED`, {
+      method: "PUT", headers,
+      body: JSON.stringify({ range: `${q}!A${startRow}:H${endRow}`, majorDimension: "ROWS", values: built.rows }),
+    });
+
+    const verify = await gsJson(`${base}/values/${encodeURIComponent(q + `!A${startRow}:H${endRow}`)}?majorDimension=ROWS`, { headers });
+    const vv = verify.values || [];
+    const totalText = clean(vv?.[12]?.[0]);
+    const totalValue = Number(vv?.[31]?.[4]);
+    if (!totalText.includes(String(data.length)) || totalValue !== data.length + built.concurrent) {
+      throw new Error(`Google Sheet đã nhận lệnh nhưng kiểm tra lại chưa khớp tổng số (${data.length} / ${data.length + built.concurrent}).`);
+    }
+    if (!options.silentSuccess) alert(
+      `${action} TUẦN ${week} THÀNH CÔNG\n\nTab: ${target.sheetName}\nTiết dạy: ${data.length}\nKiêm nhiệm: ${built.concurrent}\nTổng: ${data.length + built.concurrent}\n\nĐã đọc kiểm tra lại dữ liệu sau khi ghi.`
+    );
+    return true;
+  } catch (err) {
+    console.error("[TKB] 5.6.2B.9E.4 Ghi/Cập nhật Google Sheet đa GV:", err);
+    if (options.throwOnError) throw err;
+    alert(`CHƯA GHI/CẬP NHẬT ĐƯỢC GOOGLE SHEET\n\n${err?.message || err}`);
+    return false;
+  } finally {
+    if (btn && !options.keepButtonBusy) { btn.disabled = false; btn.textContent = old || `Ghi/Cập nhật Tuần ${week} vào Google Sheet`; }
+  }
+}
+
+async function resetMultiTeacherGoogleSheet9E4(firstWeek, lastWeek) {
+  const from = Math.max(1, Math.min(35, Number(firstWeek) || 1));
+  const to = Math.max(from, Math.min(35, Number(lastWeek) || from));
+  const teacherName = clean(selectedTeacher || TEACHER);
+  const btn = document.querySelector("#outputPreviewModal .preview-google-reset-weeks"), old = btn?.textContent;
+  try {
+    if (btn) { btn.disabled = true; btn.textContent = "Đang kiểm tra..."; }
+    const ctx = await multiGsPersonalContext9E4(teacherName);
+    const mig = await ensureMultiGsLayout9E4(ctx, { allowPrompt: true });
+    const { target, headers, base, q } = ctx;
+    const r1 = multiGsWeekRange569D4(from), r2 = multiGsWeekRange569D4(to);
+    const label = from === to ? `Tuần ${from}` : `Tuần ${from}–${to}`;
+    if (!mig.migrated && !confirm(
+      `LÀM MỚI ${label} trên tab ${target.sheetName}?\n\n` +
+      `Chỉ vùng cấu trúc mới A${r1.startRow}:H${r2.endRow} được xóa. Các tuần và tab khác được giữ nguyên.`
+    )) return false;
+    if (btn) btn.textContent = `Đang làm mới ${label}...`;
+
+    await gsJson(`${base}/values/${encodeURIComponent(q + `!A${r1.startRow}:H${r2.endRow}`)}:clear`, { method: "POST", headers, body: "{}" });
+    await gsJson(`${base}:batchUpdate`, { method: "POST", headers, body: JSON.stringify({ requests: [
+      { unmergeCells: { range: { sheetId: target.sheetId, startRowIndex: r1.startRow - 1, endRowIndex: r2.endRow, startColumnIndex: 0, endColumnIndex: 8 } } },
+      { repeatCell: { range: { sheetId: target.sheetId, startRowIndex: r1.startRow - 1, endRowIndex: r2.endRow, startColumnIndex: 0, endColumnIndex: 8 }, cell: { userEnteredFormat: {} }, fields: "userEnteredFormat" } },
+      { updateCells: { range: { sheetId: target.sheetId, startRowIndex: r1.startRow - 1, endRowIndex: r2.endRow, startColumnIndex: 0, endColumnIndex: 8 }, rows: [], fields: "note,dataValidation" } },
+    ] }) });
+
+    const verify = await gsJson(`${base}/values/${encodeURIComponent(q + `!A${r1.startRow}:H${r2.endRow}`)}?majorDimension=ROWS`, { headers });
+    const remain = [];
+    (verify.values || []).forEach((row, i) => { if ((row || []).some((v) => clean(v))) remain.push(r1.startRow + i); });
+    if (remain.length) throw new Error(`Vẫn còn dữ liệu tại dòng ${remain.slice(0, 5).join(", ")}.`);
+    alert(
+      `${mig.migrated ? "ĐÃ CHUYỂN CẤU TRÚC VÀ XÓA DỮ LIỆU CŨ" : `LÀM MỚI ${label.toUpperCase()} THÀNH CÔNG`}\n\n` +
+      `Tab: ${target.sheetName}\nVùng hiện tại đã sạch: A${r1.startRow}:H${r2.endRow}.\n` +
+      `${mig.migrated ? "Toàn bộ dữ liệu cấu trúc cũ 22 dòng/tuần của tab này cũng đã được xóa; từ nay không còn chồng vùng tuần." : "Các tuần và giáo viên khác được giữ nguyên."}`
+    );
+    return true;
+  } catch (err) {
+    console.error("[TKB] 5.6.2B.9E.4 Làm mới Google Sheet đa GV:", err);
+    alert(`CHƯA LÀM MỚI ĐƯỢC GOOGLE SHEET\n\n${err?.message || err}`);
+    return false;
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = old || "Làm mới"; }
+  }
+}
+
+const exportSelectedWeek1To35ToGoogleSheetBefore9E4 = exportSelectedWeek1To35ToGoogleSheet;
+exportSelectedWeek1To35ToGoogleSheet = async function (options = {}) {
+  const teacherName = clean(selectedTeacher || TEACHER);
+  const isDam = normalizeTeacherName(teacherName) === normalizeTeacherName(TEACHER);
+  if (isDam) return exportSelectedWeek1To35ToGoogleSheetBefore9E4(options);
+  return await writeMultiTeacherGoogleSheet9E4(options);
+};
+
+const resetGoogleSheetWeekRangeBefore9E4 = resetGoogleSheetWeekRange;
+resetGoogleSheetWeekRange = async function (firstWeek, lastWeek) {
+  const teacherName = clean(selectedTeacher || TEACHER);
+  const isDam = normalizeTeacherName(teacherName) === normalizeTeacherName(TEACHER);
+  if (isDam) return resetGoogleSheetWeekRangeBefore9E4(firstWeek, lastWeek);
+  return await resetMultiTeacherGoogleSheet9E4(firstWeek, lastWeek);
+};
+
+// Multi-week: không xin token công vụ trước khi ghi Sheet cá nhân.
+const exportSelectedWeeksToGoogleSheetBefore9E4 = exportSelectedWeeksToGoogleSheet;
+exportSelectedWeeksToGoogleSheet = async function (weeks) {
+  const teacherName = clean(selectedTeacher || TEACHER);
+  const isDam = normalizeTeacherName(teacherName) === normalizeTeacherName(TEACHER);
+  if (isDam) return exportSelectedWeeksToGoogleSheetBefore9E4(weeks);
+  const chosen = normalizeOutputWeeks(weeks);
+  if (!chosen.length) return alert("Hãy chọn ít nhất 1 tuần.");
+  if (chosen.length === 1) {
+    return await withOutputWeekAsync561B4B(chosen[0], () => writeMultiTeacherGoogleSheet9E4({ week: chosen[0] }));
+  }
+  if (!confirm(`GHI/CẬP NHẬT ${chosen.length} TUẦN vào Google Sheet cá nhân của ${teacherName}?\n\n${chosen.map((w) => `Tuần ${w}`).join(", ")}`)) return false;
+  const btn = document.querySelector("#outputPreviewModal .preview-google-write-week1-35");
+  const old = btn?.textContent, ok = [], failed = [];
+  try {
+    if (btn) { btn.disabled = true; btn.textContent = "Đang xác thực Gmail cá nhân..."; }
+    // Xin đúng token cá nhân một lần, các tuần sau tái sử dụng token cache 9E.4.
+    await getMultiGsPersonalToken9E4(false);
+    for (let i = 0; i < chosen.length; i++) {
+      const week = chosen[i];
+      if (btn) btn.textContent = `Đang ghi ${i + 1}/${chosen.length} · Tuần ${week}...`;
+      try {
+        const result = await withOutputWeekAsync561B4B(week, () => writeMultiTeacherGoogleSheet9E4({
+          week, skipConfirm: true, silentSuccess: true, throwOnError: true, keepButtonBusy: true,
+        }));
+        if (result === true) ok.push(week); else failed.push({ week, error: "Không hoàn tất" });
+      } catch (err) { failed.push({ week, error: err?.message || String(err) }); }
+    }
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = old || "Ghi/Cập nhật Google Sheet"; }
+  }
+  let msg = `ĐÃ XỬ LÝ ${chosen.length} TUẦN\n\nThành công: ${ok.length}/${chosen.length}`;
+  if (ok.length) msg += `\nTuần đã cập nhật: ${ok.join(", ")}`;
+  if (failed.length) msg += `\n\nChưa cập nhật: ${failed.map((x) => `Tuần ${x.week}: ${x.error}`).join("\n")}`;
+  alert(msg);
+  return failed.length === 0;
+};
