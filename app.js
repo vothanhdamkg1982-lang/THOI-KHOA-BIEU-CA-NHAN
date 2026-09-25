@@ -2930,7 +2930,10 @@ function outputScheduleData() {
         };
       return y;
     })
-    .filter(Boolean);
+    // BƯỚC 5.6.2B.9E.1B: TKB chính thức mới chỉ có Tiết 1–7.
+    // Lọc ngay tại nguồn dữ liệu đầu ra để Preview/Excel/PDF/In/Google Sheet
+    // không thể tái hiện Tiết 8 còn sót trong cache/phiên cũ.
+    .filter((x) => x && Number(x.tiet) >= 1 && Number(x.tiet) <= 7);
 }
 function outputEditRowsHtml() {
   applyLessonPlan();
