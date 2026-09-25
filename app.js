@@ -7577,3 +7577,28 @@ exportSelectedWeek1To35ToGoogleSheet = async function (options = {}) {
     GOOGLE_SHEETS_TEACHER_GID = oldTeacherGid;
   }
 };
+
+// BƯỚC 5.6.2B.9C.2D - Google Sheet đa GV: Làm mới đúng tab giáo viên đang chọn.
+// Đậm giữ nguyên Google Sheet công vụ; giáo viên khác dùng file cá nhân thử nghiệm.
+const resetGoogleSheetWeekRangeBefore562B9C2D = resetGoogleSheetWeekRange;
+resetGoogleSheetWeekRange = async function(firstWeek, lastWeek) {
+  const teacherName = clean(selectedTeacher || TEACHER);
+  const isDam = normalizeTeacherName(teacherName) === normalizeTeacherName(TEACHER);
+  if (isDam) return resetGoogleSheetWeekRangeBefore562B9C2D(firstWeek, lastWeek);
+  const token = await getGoogleSheetsReadOnlyToken();
+  const oldSpreadsheetId = GOOGLE_SHEETS_SPREADSHEET_ID;
+  const oldTeacherName = GOOGLE_SHEETS_TEACHER_NAME;
+  const oldTeacherGid = GOOGLE_SHEETS_TEACHER_GID;
+  try {
+    await ensureMultiTeacherPersonalTemplate562B9C2B(token);
+    const target = await multiTeacherPersonalTarget562B9C2B(token, teacherName);
+    GOOGLE_SHEETS_SPREADSHEET_ID = target.spreadsheetId;
+    GOOGLE_SHEETS_TEACHER_NAME = target.sheetName;
+    GOOGLE_SHEETS_TEACHER_GID = target.sheetId;
+    return await resetGoogleSheetWeekRangeBefore562B9C2D(firstWeek, lastWeek);
+  } finally {
+    GOOGLE_SHEETS_SPREADSHEET_ID = oldSpreadsheetId;
+    GOOGLE_SHEETS_TEACHER_NAME = oldTeacherName;
+    GOOGLE_SHEETS_TEACHER_GID = oldTeacherGid;
+  }
+};
