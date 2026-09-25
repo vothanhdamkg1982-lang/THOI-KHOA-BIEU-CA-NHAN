@@ -573,6 +573,9 @@ function curriculumSubjectKey(value) {
     tv: "tiengviet", tviet: "tiengviet", tiengviet: "tiengviet",
     tnxh: "tnxh", tnvxh: "tnxh", tunhienxahoi: "tnxh", tunhienvaxahoi: "tnxh",
     lsdl: "lsdl", lsvdl: "lsdl", lichsudialy: "lsdl", lichsuvadialy: "lsdl",
+    // TKB thực tế ghi tách nhiều biến thể của cùng môn LS&ĐL.
+    // Chuẩn hóa về một khóa để không làm mất tiết của GV dạy Lịch sử/Địa lý.
+    lichsu: "lsdl", lsu: "lsdl", dialy: "lsdl", sudia: "lsdl",
     mt: "mythuat", mythuat: "mythuat", mithuat: "mythuat",
     an: "amnhac", amnhac: "amnhac",
     td: "gdtc", gdtc: "gdtc", theduc: "gdtc", giaoducthechat: "gdtc",
@@ -1982,15 +1985,19 @@ function inheritBuoi(value, state) {
   if (clean(value)) state.buoi = clean(value);
   return state.buoi;
 }
-function resolveTiet(row, index, rows, headerMap, state) {
+function resolveTiet(row, index, rows, headerMap, state, hintedTiet = "") {
   const raw = clean(row[headerMap.tiet]),
-    time = clean(row[headerMap.time]);
+    time = clean(row[headerMap.time]),
+    hint = /^\d+$/.test(clean(hintedTiet)) ? clean(hintedTiet) : "";
   state.lastResolveInfo = { rawTiet: raw || "", adjusted: false, note: "" };
   if (!time || /ra\s*chơi/i.test(time)) return "";
   const ctx = `${state.thu}|${normKey(state.buoi)}`;
   // Nếu cột Tiết trống: suy luận từ hàng tiết hợp lệ gần nhất phía trên trong cùng Thứ/Buổi.
   let inferred = "";
-  if (!/^\d+$/.test(raw)) {
+  // Một số TKB tách "Sinh hoạt dưới cờ" 15 phút và HĐTN trong cùng Tiết 1.
+  // Ô HĐTN có thể để trống cột Tiết nhưng ghi rõ "HĐTN (Tiết 1)".
+  // Ưu tiên số Tiết ghi trong chính ô môn trước khi suy từ hàng phía trên.
+  if (!/^\d+$/.test(raw) && !hint) {
     for (let r = index - 1; r >= 0; r--) {
       const rr = rows[r],
         t = clean(rr[headerMap.tiet]),
@@ -2006,7 +2013,7 @@ function resolveTiet(row, index, rows, headerMap, state) {
       }
     }
   }
-  let resolved = /^\d+$/.test(raw) ? raw : inferred;
+  let resolved = /^\d+$/.test(raw) ? raw : (hint || inferred);
   // Kiểm tra mâu thuẫn tuần tự trên các tiết Đậm liên tiếp trong cùng buổi.
   // Trường hợp file ghi 1, [trống=>2], 2 nhưng thời gian tiếp tục sang tiết sau: cảnh báo và dùng 3.
   const prev = state.lastResolved;
@@ -2073,6 +2080,9 @@ function extractTeacherLessons(sheetName, ws, teacherName = selectedTeacher, kno
     errors = [];
   for (let r = hr + 1; r < rows.length; r++) {
     let row = rows[r];
+    // Dừng đúng cuối vùng TKB; không để các bảng "GVCN/Cộng" phía dưới
+    // bị hiểu nhầm thành tiết dạy của giáo viên chủ nhiệm.
+    if (normKey(row?.[0]) === "gvcn") break;
     let thu = inheritThu(row[hm.thu], state),
       buoi = inheritBuoi(row[hm.buoi], state),
       time = clean(row[hm.time]);
@@ -2109,8 +2119,20 @@ function extractTeacherLessons(sheetName, ws, teacherName = selectedTeacher, kno
       }
 
       if (!belongsToTeacher || breakRow) continue;
-      let tiet = resolveTiet(row, r, rows, hm, state),
-        mon = extractSubject(src, assignedTeachers);
+      const mon = extractSubject(src, assignedTeachers);
+
+      // "Sinh hoạt dưới cờ" là dòng hoạt động ngắn đứng ngoài số tiết dạy
+      // chính khóa của bảng TKB (nguồn có dòng riêng trước HĐTN hoặc sau Tiết 7).
+      // Không đưa dòng này vào tổng số tiết dạy cá nhân.
+      if (curriculumSubjectKey(mon) === "shdc") continue;
+
+      // TKB BN có dạng: Tiết 1 = Sinh hoạt dưới cờ 15 phút, dòng kế tiếp
+      // HĐTN (Tiết 1) nhưng cột Tiết để trống. Nếu suy tuần tự sẽ đẩy
+      // HĐTN thành Tiết 2 và làm lệch toàn bộ buổi sáng của GVCN (ví dụ Vẽ).
+      const sourceKeyForPeriod = normKey(src);
+      const hintedPeriodMatch = sourceKeyForPeriod.match(/^hdtn\b.*?\(\s*tiet\s*(\d+)\s*\)/u);
+      const hintedPeriod = hintedPeriodMatch?.[1] || "";
+      let tiet = resolveTiet(row, r, rows, hm, state, hintedPeriod);
       // BƯỚC 5.6.2B.9E.1: theo TKB 28.9 đã chỉnh sửa, lịch chính thức chỉ có Tiết 1–7.
       // resolveTiet trước đây có thể suy diễn một dòng trống Tiết thành Tiết 8 theo thứ tự thời gian.
       // Bỏ dòng suy diễn >7 ngay tại parser để lần lưu kế tiếp không ghi lại Tiết 8 giả lên Supabase.
@@ -2425,6 +2447,16 @@ function normalizeSubjectForPlan(s) {
     shl: "SH LỚP",
     shlop: "SH LỚP",
     sinhhoatlop: "SH LỚP",
+    // Các cách ghi trong TKB: "Lịch Sử", "L Sử", "Địa lý", "Sử địa"
+    // đều là môn Lịch sử & Địa lý trong kho PPCT.
+    lsdl: "Lịch sử & Địa lý",
+    lsvdl: "Lịch sử & Địa lý",
+    lichsudialy: "Lịch sử & Địa lý",
+    lichsuvadialy: "Lịch sử & Địa lý",
+    lichsu: "Lịch sử & Địa lý",
+    lsu: "Lịch sử & Địa lý",
+    dialy: "Lịch sử & Địa lý",
+    sudia: "Lịch sử & Địa lý",
   };
   return builtins[compact] || raw;
 }
