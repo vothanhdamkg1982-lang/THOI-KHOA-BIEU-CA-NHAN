@@ -112,26 +112,74 @@ async function saveTimetableVersionToSupabase(version) {
   return data.id;
 }
 async function syncTimetableTeacherRowsToSupabase(version) {
-  if (!currentAuthUser || !version?.supabaseId || !version?.lessonsByTeacher) return;
-  const rows = Object.entries(version.lessonsByTeacher).flatMap(([teacherName, teacherLessons]) =>
-    (teacherLessons || []).map((x) => lessonToSupabaseRow(x, version.supabaseId, teacherName)),
+  // BƯỚC 5.6.2B.9A.1: lưu THỰC SỰ toàn bộ lessonsByTeacher vào Supabase.
+  // Không phụ thuộc việc phiên bản trong cache đã có supabaseId hay chưa.
+  if (!currentAuthUser || !version?.lessonsByTeacher) return { rows: 0, teachers: 0 };
+
+  let versionId = version.supabaseId || null;
+  if (!versionId) {
+    let q = supabaseClient
+      .from("tkb_timetable_versions")
+      .select("id")
+      .eq("user_id", currentAuthUser.id);
+    if (version.fingerprint) q = q.eq("content_hash", version.fingerprint);
+    else {
+      q = q.eq("source_filename", version.file || "")
+        .eq("effective_week", Number(version.startWeek) || 1);
+    }
+    const { data: found, error: findError } = await q.order("created_at", { ascending: false }).limit(1);
+    if (findError) throw findError;
+    versionId = found?.[0]?.id || null;
+    if (!versionId)
+      throw new Error("Không tìm thấy phiên bản TKB trên Supabase để cập nhật dữ liệu đa giáo viên.");
+    version.supabaseId = versionId;
+  }
+
+  const teacherEntries = Object.entries(version.lessonsByTeacher || {}).filter(
+    ([teacherName, teacherLessons]) => clean(teacherName) && Array.isArray(teacherLessons) && teacherLessons.length,
   );
+  const rows = teacherEntries.flatMap(([teacherName, teacherLessons]) =>
+    teacherLessons.map((x) => lessonToSupabaseRow(x, versionId, teacherName)),
+  );
+  if (!rows.length) throw new Error("Không có tiết đa giáo viên để lưu lên Supabase.");
+
   const { error: deleteError } = await supabaseClient
     .from("tkb_timetable_lessons")
     .delete()
-    .eq("timetable_version_id", version.supabaseId)
+    .eq("timetable_version_id", versionId)
     .eq("user_id", currentAuthUser.id);
   if (deleteError) throw deleteError;
-  if (rows.length) {
-    const { error: insertError } = await supabaseClient.from("tkb_timetable_lessons").insert(rows);
+
+  // Chia lô để tránh một request quá lớn khi TKB toàn trường có nhiều giáo viên.
+  const CHUNK = 300;
+  for (let i = 0; i < rows.length; i += CHUNK) {
+    const { error: insertError } = await supabaseClient
+      .from("tkb_timetable_lessons")
+      .insert(rows.slice(i, i + CHUNK));
     if (insertError) throw insertError;
   }
+
+  // Xác minh ngay sau khi ghi: không báo thành công nếu teacher_name chưa thực sự vào DB.
+  const { data: verifyRows, error: verifyError } = await supabaseClient
+    .from("tkb_timetable_lessons")
+    .select("teacher_name")
+    .eq("timetable_version_id", versionId)
+    .eq("user_id", currentAuthUser.id)
+    .not("teacher_name", "is", null);
+  if (verifyError) throw verifyError;
+  const savedTeachers = [...new Set((verifyRows || []).map((r) => clean(r.teacher_name)).filter(Boolean))];
+  if (!savedTeachers.length)
+    throw new Error("Supabase chưa ghi được teacher_name. Dữ liệu đa giáo viên chưa được lưu.");
+
   const { error: versionError } = await supabaseClient
     .from("tkb_timetable_versions")
     .update({ lesson_count: rows.length })
-    .eq("id", version.supabaseId)
+    .eq("id", versionId)
     .eq("user_id", currentAuthUser.id);
   if (versionError) throw versionError;
+
+  version.syncedToSupabase = true;
+  return { rows: rows.length, teachers: savedTeachers.length };
 }
 
 async function updateTimetableEffectiveWeekSupabase(version) {
@@ -2570,11 +2618,12 @@ async function readWorkbooks(files) {
         // thay vì bỏ toàn bộ kết quả parse vì "trùng".
         duplicate.teachers = parsed.teachers;
         duplicate.lessonsByTeacher = parsed.lessonsByTeacher;
-        if (duplicate.supabaseId && currentAuthUser)
-          await syncTimetableTeacherRowsToSupabase(duplicate);
+        let multiTeacherSync = null;
+        if (currentAuthUser)
+          multiTeacherSync = await syncTimetableTeacherRowsToSupabase(duplicate);
         saveScheduleRepository();
         alert(
-          `TKB "${file.name}" trùng với bản đã lưu "${duplicate.file}" (hiệu lực từ Tuần ${duplicate.startWeek}).\n\nĐã cập nhật danh sách và TKB của các giáo viên từ file gốc; không tạo thêm phiên bản trùng.`,
+          `TKB "${file.name}" trùng với bản đã lưu "${duplicate.file}" (hiệu lực từ Tuần ${duplicate.startWeek}).\n\nĐã cập nhật danh sách và TKB của các giáo viên từ file gốc lên Supabase${multiTeacherSync ? ` (${multiTeacherSync.teachers} giáo viên / ${multiTeacherSync.rows} tiết)` : ""}; không tạo thêm phiên bản trùng.`,
         );
         continue;
       }
