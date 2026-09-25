@@ -129,3 +129,12 @@ button:hover,select:hover{border-color:#9BC9AE}.toolbar button:hover{background:
 .matrix-heading h2,.matrix-session-title,.week-matrix .matrix-period,.matrix-class{color:#0B6848!important}.matrix-session-title{background:#EAF7EF!important;border-color:#C8DFD0!important}.matrix-lesson{background:#F4FBF6!important;border-color:#C8DFD0!important;border-left-color:#0B7A53!important}.matrix-lesson.clickable-lesson:hover{border-color:#75B592!important;box-shadow:0 5px 14px rgba(11,122,83,.14)!important}
 .source-title h3,.source-badge{color:#0B6848!important}.source-badge{background:#EAF7EF!important}.source-cell{border-color:#C8DFD0!important;background:#F6FBF7!important}.matrix-lesson.clickable-lesson::after{color:#0B6848!important;background:#EAF7EF!important;border-color:#B8DCC5!important}
 @media print{.schedule-table thead th{background:#0B7A53!important}.schedule-table .day-cell{background:#EAF7EF!important}.schedule-table .session-cell{background:#F4FBF6!important}}
+/* BƯỚC 5.6.1 - Chọn giáo viên đang xem */
+.teacher-select{margin-left:6px;min-width:150px;padding:6px 30px 6px 10px;border:1px solid #9bc9ae;border-radius:8px;background:#fff;color:#0b6848;font:inherit;font-weight:700;outline:none}.teacher-select:focus{border-color:#0b7a53;box-shadow:0 0 0 3px rgba(11,122,83,.12)}
+
+/* BƯỚC 5.6.2B.2 - hộp kiểm tra đọc kho PPCT chung, không ảnh hưởng bảng TKB */
+.curriculum-probe{display:flex;align-items:flex-start;gap:12px;flex-wrap:wrap}
+.curriculum-probe>span{flex:1;min-width:320px}
+.curriculum-probe .pl2-details{margin-top:7px}
+.curriculum-probe .curriculum-miss{border-style:dashed}
+.curriculum-probe small{display:block;margin-top:7px;opacity:.75}

@@ -1,5 +1,8 @@
 "use strict";
 const TEACHER = "Đậm";
+// BƯỚC 5.6.1: giáo viên đang xem có thể đổi động theo TKB toàn trường.
+let selectedTeacher = TEACHER;
+let teacherCatalog = [TEACHER];
 // BƯỚC 3.3 - Kho TKB + Phụ lục 2 + Lịch năm học: Supabase là nguồn dữ liệu chính; cache cục bộ được tách theo tài khoản.
 const SUPABASE_URL = "https://ohmwphdeeldmlxuuknny.supabase.co";
 const SUPABASE_PUBLISHABLE_KEY =
@@ -388,6 +391,242 @@ async function loadAppendix2VersionFromSupabase(version) {
   applyLessonPlan();
   render();
 }
+// BƯỚC 5.6.2 - Phụ lục 2 động theo giáo viên đang xem.
+// Không gắn cứng tên giáo viên vào Phụ lục 2. Mỗi khi đổi giáo viên, ứng dụng
+// lấy Môn + Khối từ TKB thực tế rồi chọn phiên bản PL2 trong kho có độ phủ cao nhất.
+function teacherTeachingScope() {
+  const out = [];
+  const seen = new Set();
+  for (const x of allLessons || []) {
+    const subject = clean(x?.monHoc);
+    const grade = gradeFromClass(x?.lop);
+    if (!subject || !grade) continue;
+    const aliases = [...subjectAliasKeys(subject)];
+    const id = `${aliases.sort().join("|")}::${grade}`;
+    if (seen.has(id)) continue;
+    seen.add(id);
+    out.push({ subject, grade, aliases: new Set(aliases) });
+  }
+  return out;
+}
+function appendixSubjectMatchesScope(subject, grade, scope) {
+  const g = Number(grade);
+  const aliases = subjectAliasKeys(subject);
+  return scope.some(
+    (item) =>
+      Number(item.grade) === g && [...aliases].some((k) => item.aliases.has(k)),
+  );
+}
+async function autoLoadAppendix2ForSelectedTeacher() {
+  if (!supabaseClient || !currentAuthUser) {
+    applyLessonPlan();
+    render();
+    return;
+  }
+  const scope = teacherTeachingScope();
+  if (!scope.length) {
+    lessonPlanMap.clear();
+    planSubjectCatalog.clear();
+    lessonPlanMeta = { file: "", type: "", count: 0 };
+    const info = $("pl2Info");
+    if (info)
+      info.textContent = `Giáo viên ${selectedTeacher} chưa có tiết dạy trong TKB đang chọn.`;
+    render();
+    return;
+  }
+  try {
+    const versions = await listAppendix2VersionsFromSupabase();
+    let best = null;
+    for (const version of versions) {
+      const { data: rows, error } = await supabaseClient
+        .from("tkb_appendix2_lessons")
+        .select("subject_name,grade")
+        .eq("user_id", currentAuthUser.id)
+        .eq("appendix2_version_id", version.id);
+      if (error) throw error;
+      const covered = new Set();
+      for (const row of rows || []) {
+        scope.forEach((item, i) => {
+          if (Number(item.grade) !== Number(row.grade)) return;
+          const aliases = subjectAliasKeys(row.subject_name);
+          if ([...aliases].some((k) => item.aliases.has(k))) covered.add(i);
+        });
+      }
+      const score = covered.size;
+      if (!best || score > best.score) best = { version, score };
+    }
+    if (!best || best.score <= 0) {
+      lessonPlanMap.clear();
+      planSubjectCatalog.clear();
+      lessonPlanMeta = { file: "", type: "", count: 0 };
+      const subjects = scope.map((x) => `${x.subject} K${x.grade}`).join(", ");
+      const info = $("pl2Info");
+      if (info)
+        info.innerHTML = `<b>${esc(selectedTeacher)}</b> · Chưa có Phụ lục 2 phù hợp trong kho cho: ${esc(subjects)}`;
+      render();
+      return;
+    }
+    await loadAppendix2VersionFromSupabase(best.version);
+    const info = $("pl2Info");
+    if (info)
+      info.innerHTML += ` · <b>GV: ${esc(selectedTeacher)}</b> · khớp ${best.score}/${scope.length} nhóm Môn + Khối`;
+  } catch (err) {
+    console.error("[TKB] Không tự chọn được Phụ lục 2 theo giáo viên", err);
+    const info = $("pl2Info");
+    if (info)
+      info.innerHTML += ` · ⚠ Chưa tự chọn được PL2 cho ${esc(selectedTeacher)}`;
+  }
+}
+
+// BƯỚC 5.6.2B.2 - CHỈ ĐỌC THỬ kho PPCT chung tKB_curriculum.
+// Không ghi/xóa dữ liệu, không thay lessonPlanMap và không thay cơ chế Phụ lục 2 hiện tại.
+function curriculumBaseSubject(code) {
+  return clean(code).replace(/\s+(?:\d+|[A-Z])$/iu, "").trim();
+}
+// BƯỚC 5.6.2B.3A - So khớp môn CHẶT cho kho PPCT chung.
+// Không dùng initials/noConnectors của subjectAliasKeys vì các khóa 1 ký tự
+// (ví dụ "t", "c") có thể làm nhiều môn khác nhau khớp giả.
+function curriculumSubjectKey(value) {
+  const compact = normKey(clean(value)).replace(/[^a-z0-9]+/g, "");
+  const aliases = {
+    th: "tinhoc", tinhoc: "tinhoc",
+    cn: "congnghe", cnghe: "congnghe", congnghe: "congnghe",
+    dd: "daoduc", daoduc: "daoduc",
+    tv: "tiengviet", tviet: "tiengviet", tiengviet: "tiengviet",
+    tnxh: "tnxh", tnvxh: "tnxh", tunhienxahoi: "tnxh", tunhienvaxahoi: "tnxh",
+    lsdl: "lsdl", lsvdl: "lsdl", lichsudialy: "lsdl", lichsuvadialy: "lsdl",
+    mt: "mythuat", mythuat: "mythuat", mithuat: "mythuat",
+    an: "amnhac", amnhac: "amnhac",
+    td: "gdtc", gdtc: "gdtc", theduc: "gdtc", giaoducthechat: "gdtc",
+    toan: "toan", khoahoc: "khoahoc",
+    tienganh: "tienganh", av: "tienganh",
+    ltt: "ltt", lttv: "lttv",
+    // Hoạt động trải nghiệm trong kho PPCT được tách thành 3 mạch:
+    // HĐGDCĐ (Hoạt động giáo dục theo chủ đề), SHDC, SHL.
+    // TKB ghi chung HĐTN được hiểu là tiết HĐGDCĐ; các nhãn sinh hoạt được giữ riêng.
+    hdtn: "hdgdcd", hoatdongtrainghiem: "hdgdcd", hdgdcd: "hdgdcd",
+    shdc: "shdc", sinhhoatduoico: "shdc",
+    shl: "shl", shlop: "shl", sinhhoatlop: "shl",
+  };
+  return aliases[compact] || compact;
+}
+function curriculumSubjectMatches(subject, subjectCode) {
+  const a = curriculumSubjectKey(subject);
+  const b = curriculumSubjectKey(curriculumBaseSubject(subjectCode));
+  return !!a && !!b && a === b;
+}
+// BƯỚC 5.6.2B.4 - Kho PPCT chung chỉ cấp tên bài cho cửa sổ Xem trước.
+// Không ghi đè lessonPlanMap/Phụ lục 2 và chưa thay dữ liệu của Excel/PDF/In/Google Sheet.
+async function sharedCurriculumPreviewData() {
+  const week = Number($("weekSelect")?.value || 1);
+  const source = filterSchedule();
+  if (!source.length) return [];
+  if (!supabaseClient) throw new Error("Supabase chưa sẵn sàng.");
+  const grades = [...new Set(source.map((x) => gradeFromClass(x.lop)).filter(Boolean))];
+  let q = supabaseClient
+    .from("tkb_curriculum")
+    .select("week,ppct,subject_code,grade,lesson_name,stem")
+    .eq("week", week)
+    .order("grade", { ascending: true })
+    .order("subject_code", { ascending: true })
+    .order("ppct", { ascending: true });
+  if (grades.length) q = q.in("grade", grades);
+  const { data, error } = await q;
+  if (error) throw error;
+  const rows = data || [];
+  const edits = loadOutputEdits();
+  return source.map((x) => {
+    const e = edits[outputLessonId(x)];
+    if (e?.deleted) return null;
+    const y = { ...x };
+    if (e?.monHoc !== undefined) y.monHoc = e.monHoc;
+    if (e?.lop !== undefined) y.lop = e.lop;
+    const grade = gradeFromClass(y.lop);
+    const hit = rows.find(
+      (r) => Number(r.grade) === Number(grade) && curriculumSubjectMatches(y.monHoc, r.subject_code),
+    );
+    const curriculumPlan = hit
+      ? {
+          subject: curriculumBaseSubject(hit.subject_code),
+          grade,
+          week,
+          annualPeriod: hit.ppct ?? "",
+          title: clean(hit.lesson_name),
+          duration: "",
+          integration: clean(hit.stem),
+          note: "",
+          source: "Kho PPCT chung",
+        }
+      : null;
+    // Điều chỉnh thủ công trong Xem trước vẫn có quyền ưu tiên cao nhất.
+    if (e?.title !== undefined) {
+      y.plan = {
+        ...(curriculumPlan || {}),
+        title: e.title,
+        annualPeriod: e.annualPeriod !== undefined ? e.annualPeriod : curriculumPlan?.annualPeriod || "",
+        week,
+        subject: normalizeSubjectForPlan(y.monHoc),
+        grade,
+      };
+    } else y.plan = curriculumPlan;
+    y.planWeek = week;
+    y.planSubject = normalizeSubjectForPlan(y.monHoc);
+    y.planGrade = grade;
+    return y;
+  }).filter(Boolean);
+}
+
+async function probeSharedCurriculum() {
+  const status = $("curriculumProbeStatus");
+  const btn = $("curriculumProbeBtn");
+  if (!status || !btn) return;
+  if (!supabaseClient) {
+    status.textContent = "Supabase chưa sẵn sàng. Hãy chờ kết nối rồi thử lại.";
+    return;
+  }
+  const week = Number($("weekSelect")?.value || 1);
+  const scope = teacherTeachingScope();
+  if (!scope.length) {
+    status.textContent = `Giáo viên ${selectedTeacher} chưa có tiết trong TKB Tuần ${week}.`;
+    return;
+  }
+  const grades = [...new Set(scope.map((x) => Number(x.grade)).filter(Boolean))];
+  btn.disabled = true;
+  status.textContent = `Đang đọc thử tKB_curriculum · ${selectedTeacher} · Tuần ${week}...`;
+  try {
+    let q = supabaseClient
+      .from("tkb_curriculum")
+      .select("week,ppct,subject_code,grade,lesson_name,stem")
+      .eq("week", week)
+      .order("grade", { ascending: true })
+      .order("subject_code", { ascending: true })
+      .order("ppct", { ascending: true });
+    if (grades.length) q = q.in("grade", grades);
+    const { data, error } = await q;
+    if (error) throw error;
+    const rows = data || [];
+    const results = scope.map((item) => {
+      const hits = rows.filter(
+        (r) => Number(r.grade) === Number(item.grade) && curriculumSubjectMatches(item.subject, r.subject_code),
+      );
+      return { item, hits };
+    });
+    const matched = results.filter((x) => x.hits.length).length;
+    const chips = results
+      .map(({ item, hits }) => {
+        const sample = hits[0]?.lesson_name ? ` · ${hits[0].lesson_name}` : "";
+        return `<span class="pl2-chip ${hits.length ? "" : "curriculum-miss"}">${esc(item.subject)} K${item.grade}: <b>${hits.length}</b>${hits.length ? esc(sample) : " · chưa khớp mã môn"}</span>`;
+      })
+      .join("");
+    status.innerHTML = `<b>PPCT chung · ${esc(selectedTeacher)} · Tuần ${week}: khớp ${matched}/${results.length} nhóm Môn + Khối</b><div class="pl2-details">${chips}</div><small>Chỉ kiểm tra đọc dữ liệu; Phụ lục 2 hiện tại chưa bị thay đổi.</small>`;
+  } catch (err) {
+    console.error("[TKB] Lỗi đọc thử tKB_curriculum", err);
+    status.innerHTML = `<b>⚠ Chưa đọc được tKB_curriculum.</b> ${esc(err?.message || err)}<div><small>Không có thay đổi nào đối với TKB hoặc Phụ lục 2 hiện tại.</small></div>`;
+  } finally {
+    btn.disabled = false;
+  }
+}
+
 async function openAppendix2RepoManager() {
   if (!currentAuthUser)
     return alert("Hãy đăng nhập giáo viên trước khi mở Kho Phụ lục 2.");
@@ -540,6 +779,8 @@ async function restoreScheduleRepositoryFromSupabase() {
     .filter((v) => v.lessons.length);
   // Supabase là nguồn lâu dài sau khi đăng nhập; localStorage được cập nhật lại làm bản dự phòng.
   scheduleVersions.splice(0, scheduleVersions.length, ...restored);
+  loadHomeroomTeacherMap();
+  enrichAllScheduleVersionsWithHomeroom();
   scheduleVersions.sort(
     (a, b) =>
       a.startWeek - b.startWeek ||
@@ -1190,21 +1431,223 @@ function normalizeTeacherName(s) {
     .toLocaleLowerCase("vi-VN")
     .replace(/\s/g, "");
 }
-function teacherCell(s) {
-  return (
-    normalizeTeacherName(s).includes(normalizeTeacherName(TEACHER)) &&
-    /\([^)]*đ\s*ậ\s*m[^)]*\)/iu.test(String(s ?? ""))
+function teacherNamesFromCell(s, knownTeachers = []) {
+  const raw = String(s ?? "");
+  const out = [];
+  const add = (value) => {
+    const name = clean(value);
+    const k = normKey(name);
+    if (!name || !/[A-Za-zÀ-ỹĐđ]/u.test(name)) return;
+    if (/^tiet\s*\d+$/u.test(k) || /^(on|tiet|buoi|lan)\b/u.test(k)) return;
+    if (!out.some((x) => normalizeTeacherName(x) === normalizeTeacherName(name)))
+      out.push(name);
+  };
+
+  // Dạng chuẩn: "Môn (Tên GV)".
+  // BƯỚC 5.6.1B.2A: trong file thật, GV T.Hiếu được ghi rút gọn thành
+  // "M.T (Hiếu)" / "MT (Hiếu)". Chỉ ánh xạ riêng trong ô môn M.T/MT để
+  // không nhầm với giáo viên/GVCN tên Hiếu hoặc "C Hiếu".
+  const rawSubjectKey = normKey(raw).replace(/\s+/g, "");
+  const shortHieuIsTHieu = /^(m\.?t)/u.test(rawSubjectKey);
+  for (const m of raw.matchAll(/\(([^)]+)\)/gu)) {
+    const inside = clean(m[1]);
+    if (shortHieuIsTHieu && normKey(inside) === "hieu") {
+      const canonicalTHieu = (knownTeachers || []).find(
+        (x) => normKey(x).replace(/\s+/g, "") === "t.hieu",
+      );
+      add(canonicalTHieu || "T.Hiếu");
+    } else add(inside);
+  }
+
+  // BƯỚC 5.6.1B: file TKB thực tế có các ô nhập thiếu dấu ')' như "T D (Vũ".
+  // Chỉ nhận phần ngoặc mở ở CUỐI ô để không nuốt nhầm chú thích chuyên môn ở giữa chuỗi.
+  const openTail = raw.match(/\(([^()]*)$/u);
+  if (openTail) {
+    const inside = clean(openTail[1]);
+    if (shortHieuIsTHieu && normKey(inside) === "hieu") {
+      const canonicalTHieu = (knownTeachers || []).find(
+        (x) => normKey(x).replace(/\s+/g, "") === "t.hieu",
+      );
+      add(canonicalTHieu || "T.Hiếu");
+    } else add(inside);
+  }
+
+  // Lỗi gõ xác định được trong TKB 28.9: "LTT VNgọc)". Chỉ sửa đúng
+  // mẫu VNgọc ở CUỐI ô; không dùng quy tắc suffix chung để tránh nhận nhầm tên.
+  if (/v\s*ngoc\s*\)?\s*$/u.test(normKey(raw))) {
+    const canonicalNgoc = (knownTeachers || []).find(
+      (x) => normKey(x) === "ngoc",
+    );
+    add(canonicalNgoc || "Ngọc");
+  }
+
+  // Một số ô còn thiếu cả dấu '(' hoặc chỉ có dấu ')' (VD: "AV Nghĩa", "TNXH Băng)").
+  // Khi đã có danh sách GV chuẩn từ bảng Cộng cuối sheet, dùng chính danh sách đó để nhận diện chịu lỗi.
+  const rawKey = normKey(raw);
+  for (const teacher of knownTeachers || []) {
+    const tk = normKey(teacher);
+    if (!tk) continue;
+    const escaped = tk.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const re = new RegExp(`(?:^|\\s|\\()${escaped}(?:$|\\s|\\))`, "u");
+    if (re.test(rawKey)) add(teacher);
+  }
+  return out;
+}
+
+function extractTeacherExpectedCounts(wb, sheets) {
+  // BƯỚC 5.6.1B.1: đọc đúng cột "Cộng" của từng sheet rồi cộng BN + TT + BB
+  // theo tên giáo viên đã chuẩn hóa. Không lấy "số cuối cùng" của cả dòng vì mỗi
+  // điểm trường có số lớp/cột khác nhau và dễ làm sai tổng chuẩn.
+  const byTeacher = {};
+  const bySheet = {};
+  const canonicalNameByKey = {};
+
+  for (const sn of sheets) {
+    const rows = XLSX.utils.sheet_to_json(wb.Sheets[sn], {
+      header: 1, defval: "", raw: false,
+    });
+    const marker = rows.findIndex((row) => normKey(row?.[0]) === "gvcn");
+    if (marker < 0) continue;
+
+    const markerRow = rows[marker] || [];
+    const totalCol = markerRow.findIndex((v, i) => i > 0 && normKey(v) === "cong");
+    if (totalCol < 0) continue;
+
+    bySheet[sn] = {};
+    let started = false;
+    for (let r = marker + 1; r < rows.length; r++) {
+      const name = clean(rows[r]?.[0]);
+      if (!name) {
+        if (started) break;
+        continue;
+      }
+      if (!/[A-Za-zÀ-ỹĐđ]/u.test(name)) {
+        if (started) break;
+        continue;
+      }
+
+      const rawTotal = clean(rows[r]?.[totalCol]);
+      const total = Number(rawTotal.replace(/,/g, "."));
+      if (!Number.isFinite(total)) continue;
+      started = true;
+
+      const key = normalizeTeacherName(name);
+      if (!key) continue;
+      const canonical = canonicalNameByKey[key] || name;
+      canonicalNameByKey[key] = canonical;
+      bySheet[sn][canonical] = total;
+      byTeacher[canonical] = Number(byTeacher[canonical] || 0) + total;
+    }
+  }
+  return { byTeacher, bySheet };
+}
+function teacherCellFor(s, teacherName = selectedTeacher) {
+  const target = normalizeTeacherName(teacherName);
+  return teacherNamesFromCell(s).some(
+    (name) => normalizeTeacherName(name) === target,
   );
 }
-function extractSubject(s) {
-  return clean(String(s ?? "").replace(/\(\s*Đ\s*ậ\s*m\s*\)/giu, ""));
+function teacherCell(s) {
+  return teacherCellFor(s, selectedTeacher);
+}
+function extractSubject(s, assignedTeachers = []) {
+  let out = String(s ?? "")
+    .replace(/\([^)]*\)/gu, "")
+    .replace(/\([^()]*$/u, "")
+    .trim();
+  // Chịu lỗi các ô như "AV Nghĩa" hoặc "TNXH Băng)": nếu cuối ô là tên GV đã nhận diện, bỏ tên đó khỏi môn.
+  for (const teacher of assignedTeachers || []) {
+    const parts = clean(teacher).split(/\s+/u).filter(Boolean);
+    const variants = [clean(teacher), parts[parts.length - 1] || ""].filter(Boolean);
+    for (const v of variants) {
+      const escaped = v.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      out = out.replace(new RegExp(`\\s*\\(?\\s*${escaped}\\s*\\)?\\s*$`, "iu"), "").trim();
+    }
+  }
+  return clean(out);
+}
+function updateTeacherSelector(names = teacherCatalog) {
+  const sel = $("teacherSelect");
+  if (!sel) return;
+  const unique = [...new Set((names || []).map(clean).filter(Boolean))].sort(
+    (a, b) => a.localeCompare(b, "vi"),
+  );
+  if (
+    !unique.some(
+      (x) => normalizeTeacherName(x) === normalizeTeacherName(selectedTeacher),
+    )
+  )
+    unique.unshift(selectedTeacher);
+  teacherCatalog = unique;
+  sel.innerHTML = unique
+    .map((x) => `<option value="${esc(x)}">${esc(x)}</option>`)
+    .join("");
+  const matched = unique.find(
+    (x) => normalizeTeacherName(x) === normalizeTeacherName(selectedTeacher),
+  );
+  sel.value = matched || unique[0] || TEACHER;
+}
+function lessonsForSelectedTeacher(version) {
+  if (!version) return [];
+  const map = version.lessonsByTeacher || {};
+  const key = Object.keys(map).find(
+    (k) => normalizeTeacherName(k) === normalizeTeacherName(selectedTeacher),
+  );
+  if (key && Array.isArray(map[key])) return map[key];
+  // Dữ liệu kho cũ chỉ có TKB của Đậm: vẫn giữ tương thích hoàn toàn.
+  if (normalizeTeacherName(selectedTeacher) === normalizeTeacherName(TEACHER))
+    return version.lessons || [];
+  return [];
+}
+async function switchViewedTeacher(name) {
+  selectedTeacher = clean(name) || TEACHER;
+  const week = Number($("weekSelect")?.value || 1);
+  const saved = effectiveScheduleForWeek(week);
+  if (saved) {
+    allLessons = sortSchedule(
+      applyHomeroomTeachers([...lessonsForSelectedTeacher(saved)]),
+    );
+    meta = { ...saved, lessons: allLessons };
+    finishLoad();
+    $("fileInfo").innerHTML += ` · <b>Giáo viên: ${esc(selectedTeacher)}</b>`;
+  } else activateSelectedWeek();
+  // BƯỚC 5.6.2: sau khi TKB đã đổi theo giáo viên, tự chọn Phụ lục 2
+  // có Môn + Khối khớp nhiều nhất với chính TKB của giáo viên đó.
+  await autoLoadAppendix2ForSelectedTeacher();
+}
+// BƯỚC 5.5.2: đọc Lớp + Giáo viên chủ nhiệm trực tiếp từ tiêu đề cột của TKB toàn trường.
+// File thực tế đang dùng có các dạng như:
+// "1A1- Hà", "2A1( Tú)", "4A 2- N Dung", "2B.Thủy", "5B-- Hương", "1C - C Liễu".
+function parseClassHeader(classHeader) {
+  const raw = String(classHeader ?? "")
+    .replace(/\r?\n/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!raw) return { lop: "", gvcn: "" };
+
+  // Mã lớp luôn nằm ở đầu tiêu đề: 1A1, 3B2, 5C, 4A 2...
+  const m = raw.match(/^\s*(\d+\s*[A-Za-z]\s*\d*)/u);
+  if (!m) return { lop: clean(raw), gvcn: "" };
+
+  const lop = m[1].replace(/\s+/g, "").toUpperCase();
+  let rest = raw.slice(m[0].length).trim();
+
+  // Bỏ các ký tự phân cách giữa mã lớp và tên GVCN: -, --, ., :, ngoặc...
+  rest = rest.replace(/^[\s.\-–—:;_/]+/u, "").trim();
+  if (/^\([^)]*\)\s*$/u.test(rest)) rest = rest.slice(1, -1).trim();
+  else
+    rest = rest
+      .replace(/^\(\s*/u, "")
+      .replace(/\s*\)\s*$/u, "")
+      .trim();
+
+  return { lop, gvcn: clean(rest) };
 }
 function normalizeClassName(s) {
-  let x = clean(s);
-  x = x.replace(/\s*\([^)]*\)\s*$/, "");
-  x = x.split(/\s*-+\s*/)[0];
-  x = x.replace(/\s+/g, "");
-  return x;
+  return parseClassHeader(s).lop;
+}
+function extractHomeroomTeacher(classHeader) {
+  return parseClassHeader(classHeader).gvcn;
 }
 function normKey(s) {
   return clean(s)
@@ -1258,7 +1701,12 @@ function detectClassHeaders(header) {
       !k.includes("tong stt") &&
       !k.startsWith("tong")
     )
-      out.push({ col: i, label: clean(v), lop: normalizeClassName(v) });
+      out.push({
+        col: i,
+        label: clean(v),
+        lop: normalizeClassName(v),
+        gvcn: extractHomeroomTeacher(v),
+      });
   });
   return out;
 }
@@ -1332,7 +1780,7 @@ function colLetter(n) {
     s = String.fromCharCode(65 + ((n - 1) % 26)) + s;
   return s;
 }
-function extractTeacherLessons(sheetName, ws) {
+function extractTeacherLessons(sheetName, ws, teacherName = selectedTeacher, knownTeachers = []) {
   let rows = XLSX.utils.sheet_to_json(ws, {
     header: 1,
     defval: "",
@@ -1367,9 +1815,23 @@ function extractTeacherLessons(sheetName, ws) {
     let breakRow = /ra\s*chơi/i.test(row.map(clean).join(" "));
     for (const ch of classes) {
       let src = clean(row[ch.col]);
-      if (!teacherCell(src) || breakRow) continue;
+      // Quy tắc TKB toàn trường:
+      // - Có tên GV trong ngoặc => GV trong ngoặc là người dạy tiết đó.
+      // - Không ghi GV trong ngoặc => GVCN của lớp là người dạy.
+      // Nhờ vậy các GVCN (Hà, Tú, Hạnh...) cũng có TKB đầy đủ, không chỉ GV bộ môn.
+      const explicitTeachers = teacherNamesFromCell(src, knownTeachers);
+      const assignedTeachers = explicitTeachers.length
+        ? explicitTeachers
+        : ch.gvcn
+          ? [ch.gvcn]
+          : [];
+      const targetTeacher = normalizeTeacherName(teacherName);
+      const belongsToTeacher = assignedTeachers.some(
+        (n) => normalizeTeacherName(n) === targetTeacher,
+      );
+      if (!belongsToTeacher || breakRow) continue;
       let tiet = resolveTiet(row, r, rows, hm, state),
-        mon = extractSubject(src);
+        mon = extractSubject(src, assignedTeachers);
       let ri = state.lastResolveInfo || {};
       let item = {
         thu,
@@ -1378,6 +1840,7 @@ function extractTeacherLessons(sheetName, ws) {
         thoiGian: time,
         lop: ch.lop,
         monHoc: mon,
+        gvcn: ch.gvcn || "",
         diemTruong: point,
         sheetNguon: sheetName,
         dongNguon: r + 1,
@@ -1424,7 +1887,7 @@ function sortSchedule(a) {
 }
 function filterSchedule() {
   return sortSchedule(
-    allLessons.filter(
+    allLessons.filter((x) => isValidOutputSubject(x?.monHoc)).filter(
       (x) =>
         (!$("fThu").value || x.thu === $("fThu").value) &&
         (!$("fBuoi").value || clean(x.buoi) === $("fBuoi").value) &&
@@ -1463,19 +1926,22 @@ function pointBadge(s, compact = false) {
   return `<span class="point-badge point-${kind}"><span class="point-dot"></span>${esc(label)}</span>`;
 }
 function renderStats() {
+  // BƯỚC 5.6.2B.8A: giao diện chính dùng cùng bộ lọc môn hợp lệ
+  // với Xem trước/Excel/PDF/In; không tính các ô rác của bảng Cộng.
+  const dashboardLessons = allLessons.filter((x) => isValidOutputSubject(x?.monHoc));
   let p = (x) =>
-    allLessons.filter((y) => normKey(y.diemTruong).includes(x)).length;
+    dashboardLessons.filter((y) => normKey(y.diemTruong).includes(x)).length;
   let vals = [
-    ["TỔNG TIẾT", allLessons.length],
-    ["BUỔI SÁNG", allLessons.filter((x) => normKey(x.buoi) === "sang").length],
+    ["TỔNG TIẾT", dashboardLessons.length],
+    ["BUỔI SÁNG", dashboardLessons.filter((x) => normKey(x.buoi) === "sang").length],
     [
       "BUỔI CHIỀU",
-      allLessons.filter((x) => normKey(x.buoi) === "chieu").length,
+      dashboardLessons.filter((x) => normKey(x.buoi) === "chieu").length,
     ],
     ["ĐIỂM CHÍNH", p("chinh")],
     ["THIÊN TUẾ", p("thien tue")],
     ["BÃI BẤC", p("bai bac")],
-    ["SỐ LỚP", new Set(allLessons.map((x) => x.lop)).size],
+    ["SỐ LỚP", new Set(dashboardLessons.map((x) => x.lop).filter(Boolean)).size],
   ];
   $("stats").innerHTML = vals
     .map(([a, b]) => `<div class="card"><small>${a}</small><b>${b}</b></div>`)
@@ -1505,7 +1971,7 @@ function renderTable(data) {
           rows += `<td class="day-cell" rowspan="${dayEnd - i}"><strong>THỨ ${esc(String(thu).toUpperCase())}</strong></td>`;
         if (k === j)
           rows += `<td class="session-cell" rowspan="${sessionEnd - j}"><strong>${esc(buoi.toUpperCase())}</strong></td>`;
-        rows += `<td class="tiet-cell">${esc(x.tiet)}</td><td>${esc(x.thoiGian)}</td><td class="class-cell"><b>${esc(x.lop)}</b></td><td>${esc(normalizeSubjectForPlan(x.monHoc))}</td><td class="point-cell">${pointBadge(x.diemTruong)}</td></tr>`;
+        rows += `<td class="tiet-cell">${esc(x.tiet)}</td><td>${esc(x.thoiGian)}</td><td class="class-cell"><b>${esc(x.lop)}</b></td><td>${esc(normalizeSubjectForPlan(x.monHoc))}</td><td class="homeroom-cell">${esc(x.gvcn || "")}</td><td class="point-cell">${pointBadge(x.diemTruong)}</td></tr>`;
         firstDay = false;
       }
       j = sessionEnd;
@@ -1513,7 +1979,7 @@ function renderTable(data) {
     i = dayEnd;
   }
   $("view").innerHTML =
-    `<div class="schedule-table-wrap"><table class="schedule-table"><thead><tr><th>Thứ</th><th>Buổi</th><th>Tiết</th><th>Thời gian</th><th>Lớp</th><th>Môn học</th><th>Điểm trường</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+    `<div class="schedule-table-wrap"><table class="schedule-table"><thead><tr><th>Thứ</th><th>Buổi</th><th>Tiết</th><th>Thời gian</th><th>Lớp</th><th>Môn học</th><th>Giáo viên chủ nhiệm</th><th>Điểm trường</th></tr></thead><tbody>${rows}</tbody></table></div>`;
 }
 function renderWeek(data) {
   const order = ["Hai", "Ba", "Tư", "Năm", "Sáu", "Bảy", "Chủ nhật"];
@@ -1552,7 +2018,7 @@ function renderWeek(data) {
     })
     .join("");
   $("view").innerHTML =
-    `<div class="matrix-view"><div class="matrix-heading"><div><h2>LỊCH TUẦN CÁ NHÂN</h2><p>Giáo viên: <b>ĐẬM</b> · Hiển thị theo Thứ và Tiết</p></div><div class="matrix-legend">📍 Lớp · Môn · Điểm trường</div></div>${blocks}</div>`;
+    `<div class="matrix-view"><div class="matrix-heading"><div><h2>LỊCH TUẦN CÁ NHÂN</h2><p>Giáo viên: <b>${esc(selectedTeacher.toUpperCase())}</b> · Hiển thị theo Thứ và Tiết</p></div><div class="matrix-legend">📍 Lớp · Môn · Điểm trường</div></div>${blocks}</div>`;
 }
 function showSourceDetail(x) {
   if (!x) {
@@ -1659,6 +2125,17 @@ function normalizeSubjectForPlan(s) {
     congnghe: "Công nghệ",
     dd: "Đạo đức",
     daoduc: "Đạo đức",
+    tv: "Tiếng Việt",
+    tviet: "Tiếng Việt",
+    tiengviet: "Tiếng Việt",
+    hdtn: "HĐTN",
+    hoatdongtrainghiem: "HĐTN",
+    hdgdcd: "HĐTN",
+    shdc: "Sinh hoạt dưới cờ",
+    sinhhoatduoico: "Sinh hoạt dưới cờ",
+    shl: "SH LỚP",
+    shlop: "SH LỚP",
+    sinhhoatlop: "SH LỚP",
   };
   return builtins[compact] || raw;
 }
@@ -1862,6 +2339,59 @@ function render() {
   currentView === "table" ? renderTable(d) : renderWeek(d);
   bindLessonClicks();
 }
+// BƯỚC 5.5.3: bản đồ Lớp -> GVCN được đọc từ TKB toàn trường và dùng để
+// bổ sung tên GVCN cho cả các phiên bản TKB cũ đã lưu trước Bước 5.5.2.
+// Không thay đổi cấu trúc bảng Supabase hiện có.
+let homeroomTeacherMap = {};
+function homeroomCacheKey() {
+  return currentAuthUser?.id
+    ? `tkb_homeroom_map:${currentAuthUser.id}`
+    : "tkb_homeroom_map:guest";
+}
+function loadHomeroomTeacherMap() {
+  try {
+    const raw = localStorage.getItem(homeroomCacheKey());
+    const obj = raw ? JSON.parse(raw) : {};
+    homeroomTeacherMap = obj && typeof obj === "object" ? obj : {};
+  } catch (e) {
+    homeroomTeacherMap = {};
+  }
+}
+function saveHomeroomTeacherMap() {
+  try {
+    localStorage.setItem(
+      homeroomCacheKey(),
+      JSON.stringify(homeroomTeacherMap),
+    );
+  } catch (e) {
+    console.warn("Không lưu được bản đồ GVCN", e);
+  }
+}
+function mergeHomeroomTeachersFromLessons(lessons) {
+  let changed = false;
+  for (const x of lessons || []) {
+    const lop = normalizeClassName(x.lop);
+    const gvcn = clean(x.gvcn);
+    if (lop && gvcn && homeroomTeacherMap[lop] !== gvcn) {
+      homeroomTeacherMap[lop] = gvcn;
+      changed = true;
+    }
+  }
+  if (changed) saveHomeroomTeacherMap();
+  return changed;
+}
+function applyHomeroomTeachers(lessons) {
+  for (const x of lessons || []) {
+    const lop = normalizeClassName(x.lop);
+    if (!clean(x.gvcn) && lop && homeroomTeacherMap[lop])
+      x.gvcn = homeroomTeacherMap[lop];
+  }
+  return lessons;
+}
+function enrichAllScheduleVersionsWithHomeroom() {
+  for (const v of scheduleVersions || []) applyHomeroomTeachers(v.lessons);
+}
+
 function parseWorkbookFile(file) {
   return new Promise((resolve, reject) => {
     let fr = new FileReader();
@@ -1871,19 +2401,73 @@ function parseWorkbookFile(file) {
           sheets = detectSheets(wb),
           errors = [],
           counts = {},
-          lessons = [];
-        for (const s of sheets) {
-          let r = extractTeacherLessons(s, wb.Sheets[s]);
-          lessons.push(...r.lessons);
-          errors.push(...r.errors);
-          counts[s] = r.lessons.length;
+          lessons = [],
+          teacherSet = new Set();
+        // BƯỚC 5.6.1C: bảng “Cộng” chỉ hỗ trợ nhận diện tên/biến thể,
+        // KHÔNG còn là nguồn tạo danh sách giáo viên hay quyết định tổng số tiết.
+        // TKB cá nhân lấy trực tiếp từ các ô tiết học thực tế.
+        const expected = extractTeacherExpectedCounts(wb, sheets);
+        const expectedTeachers = Object.keys(expected.byTeacher || {});
+        // Quét danh sách giáo viên từ CẢ tiêu đề lớp (GVCN), bảng Cộng cuối sheet và các tên GV bộ môn trong ô TKB.
+        // Đây là điểm còn thiếu ở 5.6.1: trước đây chỉ quét tên trong ngoặc nên mất toàn bộ GVCN.
+        for (const sn of sheets) {
+          const rows = XLSX.utils.sheet_to_json(wb.Sheets[sn], {
+            header: 1,
+            defval: "",
+            raw: false,
+          });
+          const hr = detectHeaderRow(rows);
+          if (hr < 0) continue;
+          const classes = detectClassHeaders(rows[hr]);
+          classes.forEach((ch) => {
+            if (ch.gvcn) teacherSet.add(ch.gvcn);
+          });
+          for (let r = hr + 1; r < rows.length; r++)
+            for (const ch of classes)
+              teacherNamesFromCell(rows[r][ch.col], expectedTeachers).forEach((n) =>
+                teacherSet.add(n),
+              );
         }
+        if (!teacherSet.size) teacherSet.add(TEACHER);
+        const teachers = [...teacherSet].sort((a, b) =>
+          a.localeCompare(b, "vi"),
+        );
+        const lessonsByTeacher = {};
+        for (const teacherName of teachers) {
+          const teacherLessons = [];
+          const teacherErrors = [];
+          for (const sn of sheets) {
+            const r = extractTeacherLessons(sn, wb.Sheets[sn], teacherName, expectedTeachers);
+            teacherLessons.push(...r.lessons);
+            teacherErrors.push(...r.errors);
+          }
+          lessonsByTeacher[teacherName] = sortSchedule(teacherLessons);
+        }
+        const selectedKey =
+          teachers.find(
+            (x) =>
+              normalizeTeacherName(x) === normalizeTeacherName(selectedTeacher),
+          ) ||
+          teachers.find(
+            (x) => normalizeTeacherName(x) === normalizeTeacherName(TEACHER),
+          ) ||
+          teachers[0];
+        lessons = lessonsByTeacher[selectedKey] || [];
+        // counts/errors ở Bước 5.6.1 phản ánh đúng giáo viên đang xem.
+        for (const sn of sheets) {
+          const r = extractTeacherLessons(sn, wb.Sheets[sn], selectedKey, expectedTeachers);
+          counts[sn] = r.lessons.length;
+          errors.push(...r.errors);
+        }
+        // Không đối chiếu/ép tổng theo bảng “Cộng”; số tiết thực tế là số ô TKB parser nhận được.
         resolve({
           file: file.name,
           sheets,
           counts,
           errors,
           lessons: sortSchedule(lessons),
+          lessonsByTeacher,
+          teachers,
         });
       } catch (err) {
         reject(err);
@@ -1923,13 +2507,26 @@ async function readWorkbooks(files) {
   for (let i = 0; i < list.length; i++) {
     const file = list[i];
     try {
-      const parsed = await parseWorkbookFile(file),
-        sw = Math.min(35, startWeek + i),
+      const parsed = await parseWorkbookFile(file);
+      updateTeacherSelector(parsed.teachers);
+      // BƯỚC 5.6.1C: không hiện cảnh báo lệch theo bảng “Cộng”.
+      // Danh sách giáo viên và tổng tiết lấy từ các ô TKB thực tế.
+      // Luôn cập nhật GVCN từ file vừa đọc, kể cả khi TKB bị phát hiện trùng và không lưu lại.
+      mergeHomeroomTeachersFromLessons(parsed.lessons);
+      enrichAllScheduleVersionsWithHomeroom();
+      saveScheduleRepository();
+      const sw = Math.min(35, startWeek + i),
         fingerprint = scheduleFingerprint(parsed.lessons),
         duplicate = findDuplicateSchedule(fingerprint);
       if (duplicate) {
+        // BƯỚC 5.6.1A: bản TKB cũ trên Supabase chỉ lưu các tiết của Đậm.
+        // Khi người dùng tải lại đúng file gốc, bổ sung bản đồ đa giáo viên vào phiên bản đang dùng
+        // thay vì bỏ toàn bộ kết quả parse vì "trùng".
+        duplicate.teachers = parsed.teachers;
+        duplicate.lessonsByTeacher = parsed.lessonsByTeacher;
+        saveScheduleRepository();
         alert(
-          `TKB "${file.name}" trùng với bản đã lưu "${duplicate.file}" (hiệu lực từ Tuần ${duplicate.startWeek}). Hệ thống không thêm bản trùng.`,
+          `TKB "${file.name}" trùng với bản đã lưu "${duplicate.file}" (hiệu lực từ Tuần ${duplicate.startWeek}).\n\nĐã cập nhật danh sách và TKB của các giáo viên từ file gốc; không tạo thêm phiên bản trùng.`,
         );
         continue;
       }
@@ -1993,8 +2590,13 @@ function activateSelectedWeek() {
   const week = Number($("weekSelect").value || 1),
     saved = effectiveScheduleForWeek(week);
   if (saved) {
-    allLessons = [...saved.lessons];
-    meta = { ...saved };
+    loadHomeroomTeacherMap();
+    applyHomeroomTeachers(saved.lessons);
+    allLessons = sortSchedule(
+      applyHomeroomTeachers([...lessonsForSelectedTeacher(saved)]),
+    );
+    if (Array.isArray(saved.teachers)) updateTeacherSelector(saved.teachers);
+    meta = { ...saved, lessons: allLessons };
     finishLoad();
     $("fileInfo").innerHTML +=
       ` · <b>Tuần ${week}</b> · TKB hiệu lực từ <b>Tuần ${saved.startWeek}</b>`;
@@ -2014,6 +2616,7 @@ function activateSelectedWeek() {
   }
 }
 function finishLoad() {
+  const dashboardLessons = allLessons.filter((x) => isValidOutputSubject(x?.monHoc));
   let month =
     meta.file.match(/(?:THÁNG|THANG)\s*([0-9]{1,2})[.\-\s]*(20\d{2})/i) || [];
   $("fileInfo").innerHTML =
@@ -2022,25 +2625,25 @@ function finishLoad() {
   setOptions(
     "fThu",
     ["Hai", "Ba", "Tư", "Năm", "Sáu", "Bảy", "Chủ nhật"].filter((d) =>
-      allLessons.some((x) => x.thu === d),
+      dashboardLessons.some((x) => x.thu === d),
     ),
     "Tất cả Thứ",
   );
   setOptions(
     "fPoint",
-    allLessons.map((x) => x.diemTruong),
+    dashboardLessons.map((x) => x.diemTruong),
     "Tất cả điểm trường",
   );
   setOptions(
     "fClass",
-    allLessons.map((x) => x.lop),
+    dashboardLessons.map((x) => x.lop),
     "Tất cả lớp",
   );
   $("scan").innerHTML =
-    `<b>Đã quét: ${meta.sheets.length} sheet</b> · ${meta.sheets.map((s) => `${esc(s)}: ${meta.counts[s] || 0} tiết Đậm`).join(" · ")} · <b>Tổng: ${allLessons.length}</b><br><small><b>TKB có hiệu lực:</b> ${repositorySummary()}</small>`;
+    `<b>Đã quét: ${meta.sheets.length} sheet</b> · ${meta.sheets.map((s) => `${esc(s)}: ${dashboardLessons.filter((x) => x.sheetNguon === s).length} tiết ${esc(selectedTeacher)}`).join(" · ")} · <b>Tổng: ${dashboardLessons.length}</b><br><small><b>TKB có hiệu lực:</b> ${repositorySummary()}</small>`;
   $("errors").innerHTML = meta.errors.length
     ? `<div class="warn"><b>⚠️ DỮ LIỆU CẦN KIỂM TRA</b><br>${meta.errors.map((x) => `${esc(x.sheetNguon)} → dòng ${x.dongNguon} → cột ${x.cotNguon} → ${esc(x.oNguon)}: <span class="bad">${esc(x.loi)}</span>`).join("<br>")}</div>`
-    : `<div class="info ok">✓ Không phát hiện tiết Đậm thiếu Thứ, Buổi, Lớp, Thời gian, Môn hoặc Tiết.</div>`;
+    : `<div class="info ok">✓ Không phát hiện tiết ${esc(selectedTeacher)} thiếu Thứ, Buổi, Lớp, Thời gian, Môn hoặc Tiết.</div>`;
   render();
 }
 function getConcurrentPeriods() {
@@ -2273,18 +2876,11 @@ function exportExcel() {
       "",
     ]),
   );
+  // BƯỚC 5.6.2B.8B: khôi phục Kiêm nhiệm như một phần khối lượng công việc,
+  // nhưng KHÔNG trộn vào số tiết dạy thực tế trên TKB.
   const concurrent = getConcurrentPeriods();
   if (concurrent > 0)
-    rows.push([
-      subjects.length + 1,
-      "Kiêm nhiệm",
-      "",
-      "",
-      concurrent,
-      "",
-      "",
-      "",
-    ]);
+    rows.push([subjects.length + 1, "Kiêm nhiệm", "", "", concurrent, "", "", ""]);
   const summaryDetailRows = subjects.length + (concurrent > 0 ? 1 : 0);
   const sumRow = rows.length + 1;
   rows.push(["", "Tổng số", "", "", d.length + concurrent, "", "", ""]);
@@ -2305,7 +2901,7 @@ function exportExcel() {
   rows.push(["", "", "", "", "", "", "", ""]);
   rows.push(["", "", "", "", "", "", "", ""]);
   const signatureNameRow = rows.length + 1;
-  rows.push(["", "", "", "", "", "Võ Thanh Đậm", "", ""]);
+  rows.push(["", "", "", "", "", outputTeacherDisplayName(), "", ""]);
 
   const ws = XLSX.utils.aoa_to_sheet(rows);
   const endSchedule = morningStart + maxMorning + maxAfternoon - 1;
@@ -2628,9 +3224,13 @@ function exportExcel() {
       };
     }
   XLSX.utils.book_append_sheet(wb, ws2, "Đối chiếu nguồn");
-  XLSX.writeFile(wb, `TKB_CA_NHAN_GV_DAM_TUAN_${wd.week}.xlsx`, {
+  XLSX.writeFile(wb, `TKB_CA_NHAN_${outputTeacherFileKey()}_TUAN_${wd.week}.xlsx`, {
     cellStyles: true,
   });
+}
+function isOptionalPracticeSubject(subject) {
+  const k = curriculumSubjectKey(subject);
+  return k === "ltt" || k === "lttv";
 }
 function excelLessonCellFormal(data, day, session, tiet) {
   const items = data.filter(
@@ -2645,8 +3245,8 @@ function excelLessonCellFormal(data, day, session, tiet) {
       const planTiet = x.plan?.annualPeriod || x.plan?.week || x.planWeek || "";
       const lesson = x.plan?.title
         ? `Tiết ${planTiet} - ${x.plan.title}`
-        : `[Chưa ghép Phụ lục 2]`;
-      return `${sub} ${clean(x.lop)} ${lesson}`;
+        : isOptionalPracticeSubject(x.monHoc) ? "" : `[Chưa ghép Phụ lục 2]`;
+      return `${sub} ${clean(x.lop)}${lesson ? ` ${lesson}` : ""}`;
     })
     .join("\n────────\n");
 }
@@ -2696,14 +3296,36 @@ function formalLessonHtml(data, day, session, tiet) {
   return items
     .map((x) => {
       const sub = normalizeSubjectForPlan(x.monHoc),
-        title = x.plan?.title || "[Chưa ghép Phụ lục 2]",
+        title = x.plan?.title || "",
         planTiet = x.plan?.annualPeriod || x.plan?.week || x.planWeek || "";
-      return `<div class="formal-lesson"><b>${esc(sub)} ${esc(x.lop)}</b>${x.plan ? ` Tiết ${esc(planTiet)} - ` : " - "}${esc(title)}</div>`;
+      if (!x.plan && isOptionalPracticeSubject(x.monHoc))
+        return `<div class="formal-lesson"><b>${esc(sub)} ${esc(x.lop)}</b></div>`;
+      return `<div class="formal-lesson"><b>${esc(sub)} ${esc(x.lop)}</b>${x.plan ? ` Tiết ${esc(planTiet)} - ` : " - "}${esc(title || "[Chưa ghép Phụ lục 2]")}</div>`;
     })
     .join("<hr>");
 }
+function outputTeacherDisplayName() {
+  return normalizeTeacherName(selectedTeacher) === normalizeTeacherName(TEACHER)
+    ? "Võ Thanh Đậm"
+    : clean(selectedTeacher);
+}
+function outputTeacherFileKey() {
+  return normKey(outputTeacherDisplayName()).replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "").toUpperCase() || "GIAO_VIEN";
+}
+function isValidOutputSubject(subject) {
+  const key = curriculumSubjectKey(normalizeSubjectForPlan(subject));
+  return new Set([
+    "tinhoc", "congnghe", "daoduc", "tiengviet", "toan",
+    "khoahoc", "tnxh", "lsdl", "mythuat", "amnhac", "gdtc",
+    "tienganh", "ltt", "lttv", "hdgdcd", "shdc", "shl"
+  ]).has(key);
+}
 function buildFormalOutput(data) {
   applyLessonPlan();
+  // BƯỚC 5.6.2B.7A: chỉ các tiết có môn học hợp lệ mới được đưa vào
+  // Phụ lục 1.4/TỔNG HỢP. Loại các ô rác từ bảng Cộng như 1,2,3,4,
+  // "18+4CN=22"...; không ép tổng theo bảng Cộng.
+  data = (data || []).filter((x) => isValidOutputSubject(x.monHoc));
   const wd = selectedWeekDates(),
     days = ["Hai", "Ba", "Tư", "Năm", "Sáu"],
     labels = ["Thứ hai", "Thứ ba", "Thứ tư", "Thứ năm", "Thứ sáu"];
@@ -2728,13 +3350,14 @@ function buildFormalOutput(data) {
   for (let t = 1; t <= afternoon; t++)
     grid += `<tr>${t === 1 ? `<th rowspan="${afternoon}">Chiều</th>` : ""}<th>${morning + t}</th>${days.map((day) => `<td>${formalLessonHtml(data, day, "Chiều", t)}</td>`).join("")}<td></td></tr>`;
   grid += `<tr class="formal-grid-total"><th colspan="8">Tổng số: ${data.length} tiết</th></tr></tbody></table>`;
+  // BƯỚC 5.6.2B.8B: TKB vẫn hiển thị đúng số tiết dạy thực tế;
+  // Kiêm nhiệm chỉ xuất hiện trong TỔNG HỢP và được cộng vào tổng khối lượng.
   const concurrent = getConcurrentPeriods();
-  const concurrentRow =
-    concurrent > 0
-      ? `<tr><td>${subjects.length + 1}</td><td>Kiêm nhiệm</td><td>${concurrent}</td><td></td></tr>`
-      : "";
+  const concurrentRow = concurrent > 0
+    ? `<tr><td>${subjects.length + 1}</td><td>Kiêm nhiệm</td><td>${concurrent}</td><td></td></tr>`
+    : "";
   let sum = `<h3>TỔNG HỢP</h3><table class="formal-summary"><tr><th>TT</th><th>Nội dung</th><th>Số lượng tiết học</th><th>Ghi chú</th></tr>${subjects.map((sub, i) => `<tr><td>${i + 1}</td><td>${esc(sub)}</td><td>${data.filter((x) => normalizeSubjectForPlan(x.monHoc) === sub).length}</td><td></td></tr>`).join("")}${concurrentRow}<tr class="formal-summary-total"><th></th><th>Tổng số</th><th>${data.length + concurrent}</th><th></th></tr></table>`;
-  return `<section id="formalOutput" class="formal-output"><div class="formal-title"><b>PHỤ LỤC 1.4</b><h2>Hoạt động giáo dục tuần ${wd.week}</h2><p><b>Năm học 2026 – 2027. ${esc(formalSubjectGradeText(data))}, Trường TH – THCS & THPT Lại Sơn</b></p><p><b>Tuần ${wd.week}: từ ngày ${wd.fmt(wd.start)} đến ${wd.fmt(wd.end)}</b></p></div>${grid}${sum}<div class="formal-date">${esc(formalSignatureDate(wd))}</div><div class="formal-sign"><div><b>P. HIỆU TRƯỞNG</b></div><div><b>TỔ TRƯỞNG</b></div><div><b>NGƯỜI LẬP KẾ HOẠCH</b><br><br><br><b>Võ Thanh Đậm</b></div></div></section>`;
+  return `<section id="formalOutput" class="formal-output"><div class="formal-title"><b>PHỤ LỤC 1.4</b><h2>Hoạt động giáo dục tuần ${wd.week}</h2><p><b>Năm học 2026 – 2027. ${esc(formalSubjectGradeText(data))}, Trường TH – THCS & THPT Lại Sơn</b></p><p><b>Tuần ${wd.week}: từ ngày ${wd.fmt(wd.start)} đến ${wd.fmt(wd.end)}</b></p></div>${grid}${sum}<div class="formal-date">${esc(formalSignatureDate(wd))}</div><div class="formal-sign"><div><b>P. HIỆU TRƯỞNG</b></div><div><b>TỔ TRƯỞNG</b></div><div><b>NGƯỜI LẬP KẾ HOẠCH</b><br><br><br><b>${esc(outputTeacherDisplayName())}</b></div></div></section>`;
 }
 function ensureFormalOutputStyles() {
   if (document.getElementById("formalOutputStylesV42")) return;
@@ -2877,21 +3500,27 @@ async function exportPDF() {
     holder.remove();
   }
 }
-function openOutputPreview() {
-  let d = outputScheduleData();
-  if (!d.length && !filterSchedule().length)
+async function openOutputPreview() {
+  if (!filterSchedule().length)
     return alert("Không có dữ liệu để xem trước.");
-  if (!lessonPlanMap.size)
-    return alert(
-      "Hãy tải Phụ lục 2 trước khi xem trước để có đầy đủ tên bài học.",
-    );
+  let d;
+  try {
+    d = await sharedCurriculumPreviewData();
+  } catch (err) {
+    console.error("[TKB] Không đọc được PPCT chung cho Xem trước", err);
+    return alert(`Chưa đọc được kho PPCT chung để Xem trước: ${err?.message || err}`);
+  }
   ensureFormalOutputStyles();
   document.getElementById("outputPreviewModal")?.remove();
   const modal = document.createElement("div");
   modal.id = "outputPreviewModal";
   modal.className = "output-preview-modal";
-  const renderPreview = () => {
-    d = outputScheduleData();
+  const renderPreview = async () => {
+    try {
+      d = await sharedCurriculumPreviewData();
+    } catch (err) {
+      console.error("[TKB] Không làm mới được PPCT chung trong Xem trước", err);
+    }
     const body = modal.querySelector(".output-preview-scroll");
     if (body)
       body.innerHTML = d.length
@@ -3049,6 +3678,11 @@ $("fileInput").addEventListener(
   "change",
   (e) => e.target.files.length && readWorkbooks(e.target.files),
 );
+$("teacherSelect") &&
+  $("teacherSelect").addEventListener("change", (e) =>
+    switchViewedTeacher(e.target.value),
+  );
+updateTeacherSelector();
 $("pl2Input").addEventListener(
   "change",
   (e) => e.target.files[0] && readLessonPlan(e.target.files[0]),
@@ -3061,6 +3695,8 @@ $("calendarBtn") && ($("calendarBtn").onclick = openCalendarManager);
 $("repoBtn") && ($("repoBtn").onclick = openRepoManager);
 $("appendix2RepoBtn") &&
   ($("appendix2RepoBtn").onclick = openAppendix2RepoManager);
+$("curriculumProbeBtn") &&
+  ($("curriculumProbeBtn").onclick = probeSharedCurriculum);
 $("concurrentPeriods").addEventListener("change", () => {
   if (Number($("concurrentPeriods").value) < 0)
     $("concurrentPeriods").value = 0;
@@ -5359,68 +5995,201 @@ async function exportSelectedWeek1To35ToGoogleSheet(options = {}) {
     const gsWhite = { red: 1, green: 1, blue: 1 };
     const gsDark = { red: 18 / 255, green: 52 / 255, blue: 45 / 255 };
     const greenBorder = { style: "SOLID", color: gsGreen2 };
-    const allGreenBorders = { top: greenBorder, bottom: greenBorder, left: greenBorder, right: greenBorder };
+    const allGreenBorders = {
+      top: greenBorder,
+      bottom: greenBorder,
+      left: greenBorder,
+      right: greenBorder,
+    };
     const themeReq = [];
-    const addTheme = (r0, r1, c0, c1, fmt, fields) => themeReq.push({
-      repeatCell: {
-        range: { sheetId: GOOGLE_SHEETS_TEACHER_GID, startRowIndex: r0, endRowIndex: r1, startColumnIndex: c0, endColumnIndex: c1 },
-        cell: { userEnteredFormat: fmt },
-        fields,
-      },
-    });
-    const hdr0 = leftHeaderRow - 1, hdr1 = leftSubHeaderRow;
+    const addTheme = (r0, r1, c0, c1, fmt, fields) =>
+      themeReq.push({
+        repeatCell: {
+          range: {
+            sheetId: GOOGLE_SHEETS_TEACHER_GID,
+            startRowIndex: r0,
+            endRowIndex: r1,
+            startColumnIndex: c0,
+            endColumnIndex: c1,
+          },
+          cell: { userEnteredFormat: fmt },
+          fields,
+        },
+      });
+    const hdr0 = leftHeaderRow - 1,
+      hdr1 = leftSubHeaderRow;
     // Hai hàng đầu bảng: xanh lá đậm, chữ trắng.
-    addTheme(hdr0, hdr1, 0, 8, {
-      backgroundColorStyle: { rgbColor: gsGreen }, horizontalAlignment: "CENTER", verticalAlignment: "MIDDLE",
-      textFormat: { bold: true, foregroundColorStyle: { rgbColor: gsWhite }, fontFamily: "Times New Roman", fontSize: 12 },
-      borders: allGreenBorders, wrapStrategy: "WRAP"
-    }, "userEnteredFormat.backgroundColorStyle,userEnteredFormat.horizontalAlignment,userEnteredFormat.verticalAlignment,userEnteredFormat.textFormat,userEnteredFormat.borders,userEnteredFormat.wrapStrategy");
+    addTheme(
+      hdr0,
+      hdr1,
+      0,
+      8,
+      {
+        backgroundColorStyle: { rgbColor: gsGreen },
+        horizontalAlignment: "CENTER",
+        verticalAlignment: "MIDDLE",
+        textFormat: {
+          bold: true,
+          foregroundColorStyle: { rgbColor: gsWhite },
+          fontFamily: "Times New Roman",
+          fontSize: 12,
+        },
+        borders: allGreenBorders,
+        wrapStrategy: "WRAP",
+      },
+      "userEnteredFormat.backgroundColorStyle,userEnteredFormat.horizontalAlignment,userEnteredFormat.verticalAlignment,userEnteredFormat.textFormat,userEnteredFormat.borders,userEnteredFormat.wrapStrategy",
+    );
     // Thân lịch: nền trắng/xanh mint xen kẽ, viền xanh dịu.
     for (let rr = leftScheduleStart - 1; rr < leftScheduleEnd - 1; rr++) {
-      addTheme(rr, rr + 1, 0, 8, {
-        backgroundColorStyle: { rgbColor: ((rr - (leftScheduleStart - 1)) % 2) ? gsMint2 : gsWhite },
-        textFormat: { foregroundColorStyle: { rgbColor: gsDark }, fontFamily: "Times New Roman", fontSize: 12 },
-        borders: allGreenBorders, verticalAlignment: "MIDDLE", wrapStrategy: "WRAP"
-      }, "userEnteredFormat.backgroundColorStyle,userEnteredFormat.textFormat,userEnteredFormat.borders,userEnteredFormat.verticalAlignment,userEnteredFormat.wrapStrategy");
+      addTheme(
+        rr,
+        rr + 1,
+        0,
+        8,
+        {
+          backgroundColorStyle: {
+            rgbColor: (rr - (leftScheduleStart - 1)) % 2 ? gsMint2 : gsWhite,
+          },
+          textFormat: {
+            foregroundColorStyle: { rgbColor: gsDark },
+            fontFamily: "Times New Roman",
+            fontSize: 12,
+          },
+          borders: allGreenBorders,
+          verticalAlignment: "MIDDLE",
+          wrapStrategy: "WRAP",
+        },
+        "userEnteredFormat.backgroundColorStyle,userEnteredFormat.textFormat,userEnteredFormat.borders,userEnteredFormat.verticalAlignment,userEnteredFormat.wrapStrategy",
+      );
     }
     // Cột Buổi/Tiết dùng xanh mint rõ hơn.
-    addTheme(leftScheduleStart - 1, leftScheduleEnd - 1, 0, 2, {
-      backgroundColorStyle: { rgbColor: gsMint }, horizontalAlignment: "CENTER", verticalAlignment: "MIDDLE",
-      textFormat: { bold: true, foregroundColorStyle: { rgbColor: gsDark }, fontFamily: "Times New Roman", fontSize: 12 },
-      borders: allGreenBorders
-    }, "userEnteredFormat.backgroundColorStyle,userEnteredFormat.horizontalAlignment,userEnteredFormat.verticalAlignment,userEnteredFormat.textFormat,userEnteredFormat.borders");
+    addTheme(
+      leftScheduleStart - 1,
+      leftScheduleEnd - 1,
+      0,
+      2,
+      {
+        backgroundColorStyle: { rgbColor: gsMint },
+        horizontalAlignment: "CENTER",
+        verticalAlignment: "MIDDLE",
+        textFormat: {
+          bold: true,
+          foregroundColorStyle: { rgbColor: gsDark },
+          fontFamily: "Times New Roman",
+          fontSize: 12,
+        },
+        borders: allGreenBorders,
+      },
+      "userEnteredFormat.backgroundColorStyle,userEnteredFormat.horizontalAlignment,userEnteredFormat.verticalAlignment,userEnteredFormat.textFormat,userEnteredFormat.borders",
+    );
     const totalRow0 = specialWeek1 ? 17 : startRow + 11;
     const summaryTitle0 = totalRow0 + 1;
     const summaryHeader0 = totalRow0 + 2;
     const summaryLast0 = specialWeek1 ? 24 : startRow + 18;
     // Tổng số tiết dạy.
-    addTheme(totalRow0, totalRow0 + 1, 1, 8, {
-      backgroundColorStyle: { rgbColor: gsGreen }, horizontalAlignment: "CENTER", verticalAlignment: "MIDDLE",
-      textFormat: { bold: true, foregroundColorStyle: { rgbColor: gsWhite }, fontFamily: "Times New Roman", fontSize: 12 },
-      borders: allGreenBorders
-    }, "userEnteredFormat.backgroundColorStyle,userEnteredFormat.horizontalAlignment,userEnteredFormat.verticalAlignment,userEnteredFormat.textFormat,userEnteredFormat.borders");
+    addTheme(
+      totalRow0,
+      totalRow0 + 1,
+      1,
+      8,
+      {
+        backgroundColorStyle: { rgbColor: gsGreen },
+        horizontalAlignment: "CENTER",
+        verticalAlignment: "MIDDLE",
+        textFormat: {
+          bold: true,
+          foregroundColorStyle: { rgbColor: gsWhite },
+          fontFamily: "Times New Roman",
+          fontSize: 12,
+        },
+        borders: allGreenBorders,
+      },
+      "userEnteredFormat.backgroundColorStyle,userEnteredFormat.horizontalAlignment,userEnteredFormat.verticalAlignment,userEnteredFormat.textFormat,userEnteredFormat.borders",
+    );
     // Dòng TỔNG HỢP.
-    addTheme(summaryTitle0, summaryTitle0 + 1, 1, 8, {
-      backgroundColorStyle: { rgbColor: gsMint }, horizontalAlignment: "CENTER", verticalAlignment: "MIDDLE",
-      textFormat: { bold: true, foregroundColorStyle: { rgbColor: gsDark }, fontFamily: "Times New Roman", fontSize: 12 }
-    }, "userEnteredFormat.backgroundColorStyle,userEnteredFormat.horizontalAlignment,userEnteredFormat.verticalAlignment,userEnteredFormat.textFormat");
+    addTheme(
+      summaryTitle0,
+      summaryTitle0 + 1,
+      1,
+      8,
+      {
+        backgroundColorStyle: { rgbColor: gsMint },
+        horizontalAlignment: "CENTER",
+        verticalAlignment: "MIDDLE",
+        textFormat: {
+          bold: true,
+          foregroundColorStyle: { rgbColor: gsDark },
+          fontFamily: "Times New Roman",
+          fontSize: 12,
+        },
+      },
+      "userEnteredFormat.backgroundColorStyle,userEnteredFormat.horizontalAlignment,userEnteredFormat.verticalAlignment,userEnteredFormat.textFormat",
+    );
     // Header bảng tổng hợp.
-    addTheme(summaryHeader0, summaryHeader0 + 1, 1, 8, {
-      backgroundColorStyle: { rgbColor: gsGreen2 }, horizontalAlignment: "CENTER", verticalAlignment: "MIDDLE",
-      textFormat: { bold: true, foregroundColorStyle: { rgbColor: gsWhite }, fontFamily: "Times New Roman", fontSize: 12 },
-      borders: allGreenBorders
-    }, "userEnteredFormat.backgroundColorStyle,userEnteredFormat.horizontalAlignment,userEnteredFormat.verticalAlignment,userEnteredFormat.textFormat,userEnteredFormat.borders");
+    addTheme(
+      summaryHeader0,
+      summaryHeader0 + 1,
+      1,
+      8,
+      {
+        backgroundColorStyle: { rgbColor: gsGreen2 },
+        horizontalAlignment: "CENTER",
+        verticalAlignment: "MIDDLE",
+        textFormat: {
+          bold: true,
+          foregroundColorStyle: { rgbColor: gsWhite },
+          fontFamily: "Times New Roman",
+          fontSize: 12,
+        },
+        borders: allGreenBorders,
+      },
+      "userEnteredFormat.backgroundColorStyle,userEnteredFormat.horizontalAlignment,userEnteredFormat.verticalAlignment,userEnteredFormat.textFormat,userEnteredFormat.borders",
+    );
     // Nội dung tổng hợp.
-    if (summaryLast0 > summaryHeader0 + 1) addTheme(summaryHeader0 + 1, summaryLast0, 1, 8, {
-      backgroundColorStyle: { rgbColor: gsMint2 }, horizontalAlignment: "CENTER", verticalAlignment: "MIDDLE",
-      textFormat: { foregroundColorStyle: { rgbColor: gsDark }, fontFamily: "Times New Roman", fontSize: 12 }, borders: allGreenBorders
-    }, "userEnteredFormat.backgroundColorStyle,userEnteredFormat.horizontalAlignment,userEnteredFormat.verticalAlignment,userEnteredFormat.textFormat,userEnteredFormat.borders");
+    if (summaryLast0 > summaryHeader0 + 1)
+      addTheme(
+        summaryHeader0 + 1,
+        summaryLast0,
+        1,
+        8,
+        {
+          backgroundColorStyle: { rgbColor: gsMint2 },
+          horizontalAlignment: "CENTER",
+          verticalAlignment: "MIDDLE",
+          textFormat: {
+            foregroundColorStyle: { rgbColor: gsDark },
+            fontFamily: "Times New Roman",
+            fontSize: 12,
+          },
+          borders: allGreenBorders,
+        },
+        "userEnteredFormat.backgroundColorStyle,userEnteredFormat.horizontalAlignment,userEnteredFormat.verticalAlignment,userEnteredFormat.textFormat,userEnteredFormat.borders",
+      );
     // Dòng Tổng số cuối bảng tổng hợp.
-    addTheme(summaryLast0, summaryLast0 + 1, 1, 8, {
-      backgroundColorStyle: { rgbColor: gsGreen2 }, horizontalAlignment: "CENTER", verticalAlignment: "MIDDLE",
-      textFormat: { bold: true, foregroundColorStyle: { rgbColor: gsWhite }, fontFamily: "Times New Roman", fontSize: 12 }, borders: allGreenBorders
-    }, "userEnteredFormat.backgroundColorStyle,userEnteredFormat.horizontalAlignment,userEnteredFormat.verticalAlignment,userEnteredFormat.textFormat,userEnteredFormat.borders");
-    await gsJson(`${base}:batchUpdate`, { method: "POST", headers, body: JSON.stringify({ requests: themeReq }) });
+    addTheme(
+      summaryLast0,
+      summaryLast0 + 1,
+      1,
+      8,
+      {
+        backgroundColorStyle: { rgbColor: gsGreen2 },
+        horizontalAlignment: "CENTER",
+        verticalAlignment: "MIDDLE",
+        textFormat: {
+          bold: true,
+          foregroundColorStyle: { rgbColor: gsWhite },
+          fontFamily: "Times New Roman",
+          fontSize: 12,
+        },
+        borders: allGreenBorders,
+      },
+      "userEnteredFormat.backgroundColorStyle,userEnteredFormat.horizontalAlignment,userEnteredFormat.verticalAlignment,userEnteredFormat.textFormat,userEnteredFormat.borders",
+    );
+    await gsJson(`${base}:batchUpdate`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ requests: themeReq }),
+    });
 
     // BƯỚC 5.2.7: với Tuần 1, tiêu đề tuần nằm ở hàng 5–7, ngoài vùng A8:H29.
     // Đọc đúng vùng tiêu đề để xác minh, tránh báo thất bại giả sau khi Google Sheet đã ghi thành công.
@@ -5770,9 +6539,9 @@ function withOutputWeek(week, fn) {
   try {
     if (sel) sel.value = String(week);
     const saved = effectiveScheduleForWeek(week);
-    allLessons = saved ? [...saved.lessons] : [];
+    allLessons = saved ? sortSchedule(applyHomeroomTeachers([...lessonsForSelectedTeacher(saved)])) : [];
     meta = saved
-      ? { ...saved }
+      ? { ...saved, lessons: allLessons }
       : { file: "", sheets: [], counts: {}, errors: [] };
     applyLessonPlan();
     return fn();
@@ -6265,3 +7034,283 @@ enhanceOutputPreviewMultiWeek = function () {
  `;
   document.head.appendChild(st);
 })();
+
+// BƯỚC 5.6.2B.4B - Khôi phục thanh Xem trước sau khi nguồn PPCT chung chuyển sang bất đồng bộ.
+// Giữ nguyên TKB đa giáo viên và PPCT chung; không dùng dòng Cộng làm chuẩn.
+async function withOutputWeekAsync561B4B(week, fn) {
+  const sel = $("weekSelect"), oldWeek = sel?.value, oldLessons = allLessons, oldMeta = meta;
+  try {
+    if (sel) sel.value = String(week);
+    const saved = effectiveScheduleForWeek(week);
+    allLessons = saved ? sortSchedule(applyHomeroomTeachers([...lessonsForSelectedTeacher(saved)])) : [];
+    meta = saved ? { ...saved, lessons: allLessons } : { file: "", sheets: [], counts: {}, errors: [] };
+    applyLessonPlan();
+    return await fn();
+  } finally {
+    allLessons = oldLessons; meta = oldMeta;
+    if (sel) sel.value = oldWeek;
+    applyLessonPlan();
+  }
+}
+async function renderSharedCurriculumWeeks561B4B(modal, weeks) {
+  const chosen = normalizeOutputWeeks(weeks), packets = [];
+  for (const week of chosen) {
+    const packet = await withOutputWeekAsync561B4B(week, async () => {
+      const data = await sharedCurriculumPreviewData();
+      return { week, data, html: data.length ? buildFormalOutput(data) : "" };
+    });
+    packets.push(packet);
+  }
+  if (!modal?.isConnected) return;
+  const body = modal.querySelector(".output-preview-scroll");
+  if (body) body.innerHTML = `<div class="multi-week-stack">${packets.map((p) => `<div class="multi-week-card" data-week="${p.week}">${p.html || `<div class="preview-no-lessons">Tuần ${p.week}: chưa có dữ liệu.</div>`}</div>`).join("")}</div>`;
+  const title = modal.querySelector(".output-preview-bar>b");
+  if (title) title.textContent = `XEM TRƯỚC PHỤ LỤC 1.4 · ${outputWeeksLabel(chosen)}`;
+  const edit = modal.querySelector(".preview-edit");
+  if (edit) edit.style.display = chosen.length === 1 ? "" : "none";
+  const wb = modal.querySelector(".preview-weeks");
+  if (wb) wb.textContent = `Chọn tuần (${chosen.length})`;
+  syncMultiWeekGoogleSheetButton(modal);
+}
+function waitPreviewModal561B4B(timeout = 8000) {
+  return new Promise((resolve) => {
+    const started = Date.now();
+    const tick = () => {
+      const modal = document.getElementById("outputPreviewModal");
+      if (modal) return resolve(modal);
+      if (Date.now() - started >= timeout) return resolve(null);
+      setTimeout(tick, 25);
+    };
+    tick();
+  });
+}
+function restorePreviewToolbar561B4B(modal) {
+  if (!modal) return;
+  ensureMultiOutputStyles();
+  ensureGoogleSheetsWeek1To35WriteButton();
+  ensureGoogleSheetsResetWeeksButton();
+  const bar = modal.querySelector(".output-preview-bar>div");
+  if (!bar) return;
+  let weeksBtn = bar.querySelector(".preview-weeks");
+  if (!weeksBtn) {
+    weeksBtn = document.createElement("button");
+    weeksBtn.type = "button"; weeksBtn.className = "preview-weeks";
+    bar.insertBefore(weeksBtn, bar.firstChild);
+  }
+  const cur = Math.max(1, Math.min(35, Number($("weekSelect")?.value || 1)));
+  multiOutputWeeks = [cur];
+  weeksBtn.textContent = "Chọn tuần (1)";
+  weeksBtn.onclick = () => openMultiWeekPicker(async (weeks) => {
+    multiOutputWeeks = normalizeOutputWeeks(weeks);
+    await renderSharedCurriculumWeeks561B4B(modal, multiOutputWeeks);
+  });
+  const excel = modal.querySelector(".preview-export-excel"), pdf = modal.querySelector(".preview-export-pdf"), print = modal.querySelector(".preview-print");
+  if (excel) excel.onclick = () => exportExcelWeeks(currentOutputWeeks());
+  if (pdf) pdf.onclick = () => exportPDFWeeks(currentOutputWeeks());
+  if (print) print.onclick = () => { const weeks = currentOutputWeeks(); modal.remove(); printScheduleWeeks(weeks); };
+  syncMultiWeekGoogleSheetButton(modal);
+}
+const openOutputPreviewBefore561B4B = openOutputPreview;
+openOutputPreview = async function () {
+  openOutputPreviewBefore561B4B();
+  const modal = await waitPreviewModal561B4B();
+  restorePreviewToolbar561B4B(modal);
+};
+const previewBtn561B4B = document.getElementById("previewBtn");
+if (previewBtn561B4B) previewBtn561B4B.onclick = openOutputPreview;
+
+// BƯỚC 5.6.2B.5A - Excel dùng kho PPCT chung giống Xem trước.
+// Chỉ thay nguồn tên bài cho Excel; không thay parser TKB/PDF/In/Google Sheet.
+let excelSharedCurriculumData561B5A = null;
+const outputScheduleDataBefore561B5A = outputScheduleData;
+outputScheduleData = function () {
+  return Array.isArray(excelSharedCurriculumData561B5A)
+    ? excelSharedCurriculumData561B5A
+    : outputScheduleDataBefore561B5A();
+};
+const exportExcelBefore561B5A = exportExcel;
+exportExcel = async function () {
+  try {
+    excelSharedCurriculumData561B5A = await sharedCurriculumPreviewData();
+    if (!excelSharedCurriculumData561B5A.length)
+      return alert("Không có dữ liệu để xuất.");
+    return exportExcelBefore561B5A();
+  } catch (err) {
+    console.error("[TKB] Không đọc được PPCT chung khi xuất Excel", err);
+    return alert(`Chưa đọc được kho PPCT chung để xuất Excel: ${err?.message || err}`);
+  } finally {
+    excelSharedCurriculumData561B5A = null;
+  }
+};
+exportExcelWeeks = async function (weeks) {
+  const chosen = normalizeOutputWeeks(weeks);
+  if (!chosen.length) return alert("Hãy chọn ít nhất 1 tuần.");
+  if (chosen.length === 1)
+    return withOutputWeekAsync561B4B(chosen[0], () => exportExcel());
+  if (typeof XLSX === "undefined")
+    return alert("Không tải được thư viện xuất Excel.");
+  const out = XLSX.utils.book_new(), originalWrite = XLSX.writeFile, missing = [], sourceRows = [];
+  try {
+    for (const week of chosen) {
+      let captured = null;
+      XLSX.writeFile = (wb) => { captured = wb; };
+      await withOutputWeekAsync561B4B(week, () => exportExcel());
+      if (!captured) { missing.push(week); continue; }
+      const s1 = captured.Sheets[captured.SheetNames[0]], s2 = captured.Sheets[captured.SheetNames[1]];
+      if (s1) XLSX.utils.book_append_sheet(out, s1, `Tuần ${week}`);
+      if (s2) {
+        const a = XLSX.utils.sheet_to_json(s2, { header: 1, defval: "" });
+        if (a.length) {
+          if (!sourceRows.length) sourceRows.push(["Tuần", ...a[0]]);
+          a.slice(1).forEach((r) => sourceRows.push([week, ...r]));
+        }
+      }
+    }
+  } finally { XLSX.writeFile = originalWrite; }
+  if (sourceRows.length) {
+    const src = XLSX.utils.aoa_to_sheet(sourceRows);
+    src["!cols"] = [{wch:8},{wch:9},{wch:8},{wch:9},{wch:13},{wch:22},{wch:11},{wch:10},{wch:11},{wch:12},{wch:18},{wch:10},{wch:18},{wch:22},{wch:48}];
+    src["!autofilter"] = { ref: `A1:O${sourceRows.length}` };
+    const green="0B7A53", white="FFFFFF", grid="9BC9AE";
+    for (let R=0; R<sourceRows.length; R++) for (let C=0; C<15; C++) {
+      const a=XLSX.utils.encode_cell({r:R,c:C}); if (!src[a]) continue;
+      src[a].s={font:{name:"Times New Roman",sz:11,bold:R===0,color:{rgb:R===0?white:"17382B"}},fill:R===0?{patternType:"solid",fgColor:{rgb:green}}:undefined,alignment:{horizontal:R===0?"center":"left",vertical:"center",wrapText:true},border:{top:{style:"thin",color:{rgb:grid}},bottom:{style:"thin",color:{rgb:grid}},left:{style:"thin",color:{rgb:grid}},right:{style:"thin",color:{rgb:grid}}}};
+    }
+    XLSX.utils.book_append_sheet(out, src, "Đối chiếu nguồn");
+  }
+  if (!out.SheetNames.length) return alert("Không có dữ liệu để xuất Excel cho các tuần đã chọn.");
+  const first=chosen[0], last=chosen[chosen.length-1], teacher=outputTeacherFileKey();
+  const name=chosen.length===last-first+1
+    ? `TKB_CA_NHAN_${teacher}_TUAN_${first}-${last}.xlsx`
+    : `TKB_CA_NHAN_${teacher}_${chosen.map((w)=>`T${w}`).join("_")}.xlsx`;
+  originalWrite(out,name,{cellStyles:true});
+  if (missing.length) alert(`Đã xuất các tuần có dữ liệu. Tuần chưa có dữ liệu: ${missing.join(", ")}.`);
+};
+const excelBtn561B5A = document.getElementById("excelBtn");
+if (excelBtn561B5A) excelBtn561B5A.onclick = () => exportExcel();
+
+// BƯỚC 5.6.2B.5B - PDF + In dùng kho PPCT chung giống Xem trước/Excel.
+// Chỉ thay nguồn dữ liệu cho PDF/In; không thay parser TKB, Xem trước, Excel hay Google Sheet.
+async function sharedCurriculumPackets561B5B(weeks) {
+  const chosen = normalizeOutputWeeks(weeks), packets = [];
+  for (const week of chosen) {
+    const packet = await withOutputWeekAsync561B4B(week, async () => {
+      const data = await sharedCurriculumPreviewData();
+      return { week, data, html: data.length ? buildFormalOutput(data) : "" };
+    });
+    packets.push(packet);
+  }
+  return packets;
+}
+
+exportPDFWeeks = async function (weeks) {
+  const chosen = normalizeOutputWeeks(weeks);
+  if (!chosen.length) return alert("Hãy chọn ít nhất 1 tuần.");
+  if (typeof html2canvas === "undefined" || !window.jspdf)
+    return alert("Không tải được thư viện xuất PDF.");
+  ensureFormalOutputStyles();
+  let packets;
+  try {
+    packets = (await sharedCurriculumPackets561B5B(chosen)).filter((p) => p.data.length);
+  } catch (err) {
+    console.error("[TKB] Không đọc được PPCT chung khi xuất PDF", err);
+    return alert(`Chưa đọc được kho PPCT chung để xuất PDF: ${err?.message || err}`);
+  }
+  if (!packets.length) return alert("Không có dữ liệu để xuất PDF cho các tuần đã chọn.");
+  const holder = document.createElement("div");
+  holder.className = "formal-holder";
+  holder.innerHTML = packets.map((p) => p.html).join("");
+  document.body.appendChild(holder);
+  try {
+    const { jsPDF } = window.jspdf,
+      pdf = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4" }),
+      state = { count: 0 };
+    for (const target of holder.querySelectorAll(".formal-output"))
+      await addFormalElementToPdf(pdf, target, state);
+    const first = chosen[0], last = chosen[chosen.length - 1], teacher = outputTeacherFileKey();
+    const range = chosen.length === last - first + 1
+      ? `TUAN_${first}-${last}`
+      : chosen.map((w) => `T${w}`).join("_");
+    pdf.save(`PHU_LUC_1_4_${teacher}_${range}.pdf`);
+  } finally {
+    holder.remove();
+  }
+};
+
+printScheduleWeeks = async function (weeks) {
+  const chosen = normalizeOutputWeeks(weeks);
+  if (!chosen.length) return alert("Hãy chọn ít nhất 1 tuần.");
+  ensureFormalOutputStyles();
+  ensureMultiOutputStyles();
+  let packets;
+  try {
+    packets = (await sharedCurriculumPackets561B5B(chosen)).filter((p) => p.data.length);
+  } catch (err) {
+    console.error("[TKB] Không đọc được PPCT chung khi in", err);
+    return alert(`Chưa đọc được kho PPCT chung để in: ${err?.message || err}`);
+  }
+  if (!packets.length) return alert("Không có dữ liệu để in cho các tuần đã chọn.");
+  const holder = document.createElement("div");
+  holder.className = "formal-holder print-formal";
+  holder.innerHTML = packets.map((p) => p.html).join("");
+  holder.querySelectorAll(".formal-summary tr:last-child").forEach((row) => {
+    const th = row.querySelectorAll("th"), v = th[2]?.textContent || "";
+    row.innerHTML = `<th></th><th>Tổng số</th><th>${esc(v)}</th><th></th>`;
+  });
+  document.body.appendChild(holder);
+  if (chosen.length > 1) document.body.classList.add("multi-print");
+  document.body.classList.add("printing-formal");
+  const restore = () => {
+    document.body.classList.remove("printing-formal", "multi-print");
+    holder.remove();
+    window.removeEventListener("afterprint", restore);
+  };
+  window.addEventListener("afterprint", restore);
+  setTimeout(() => window.print(), 80);
+};
+
+// Nút ngoài giao diện chính cũng dùng đúng PPCT chung.
+const pdfBtn561B5B = document.getElementById("pdfBtn");
+if (pdfBtn561B5B) pdfBtn561B5B.onclick = () => exportPDFWeeks([Number($("weekSelect")?.value || 1)]);
+const printBtn561B5B = document.getElementById("printBtn");
+if (printBtn561B5B) printBtn561B5B.onclick = () => printScheduleWeeks([Number($("weekSelect")?.value || 1)]);
+
+// BƯỚC 5.6.2B.7B - Đồng bộ bộ lọc môn hợp lệ cho Excel/PDF/In.
+// Xem trước đã dùng isValidOutputSubject(); các luồng xuất phải dùng cùng một nguồn đã lọc.
+function validFormalOutputData561B7B(data) {
+  return (Array.isArray(data) ? data : []).filter((x) => isValidOutputSubject(x?.monHoc));
+}
+
+// Excel: dữ liệu PPCT chung đưa vào hàm xuất cũ phải được lọc trước khi tính Tổng số/TỔNG HỢP.
+const exportExcelBefore561B7B = exportExcel;
+exportExcel = async function () {
+  try {
+    const data = validFormalOutputData561B7B(await sharedCurriculumPreviewData());
+    if (!data.length) return alert("Không có dữ liệu hợp lệ để xuất.");
+    excelSharedCurriculumData561B5A = data;
+    // Gọi thẳng hàm Excel gốc trước wrapper 5A để tránh wrapper 5A nạp lại dữ liệu chưa lọc.
+    return exportExcelBefore561B5A();
+  } catch (err) {
+    console.error("[TKB] Không đọc được PPCT chung khi xuất Excel", err);
+    return alert(`Chưa đọc được kho PPCT chung để xuất Excel: ${err?.message || err}`);
+  } finally {
+    excelSharedCurriculumData561B5A = null;
+  }
+};
+
+// PDF/In: packet dùng đúng cùng dữ liệu hợp lệ như Xem trước.
+sharedCurriculumPackets561B5B = async function (weeks) {
+  const chosen = normalizeOutputWeeks(weeks), packets = [];
+  for (const week of chosen) {
+    const packet = await withOutputWeekAsync561B4B(week, async () => {
+      const data = validFormalOutputData561B7B(await sharedCurriculumPreviewData());
+      return { week, data, html: data.length ? buildFormalOutput(data) : "" };
+    });
+    packets.push(packet);
+  }
+  return packets;
+};
+
+// Nút Excel ngoài giao diện (nếu được bật lại) cũng dùng bản đã lọc.
+const excelBtn561B7B = document.getElementById("excelBtn");
+if (excelBtn561B7B) excelBtn561B7B.onclick = () => exportExcel();
