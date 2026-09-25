@@ -4606,8 +4606,10 @@ function gsWeekRows(data, week, startRow) {
     }, 0);
     details = [["Phòng máy", concurrent], ["Công nghệ", countOf("Công nghệ")], ["Tin học", countOf("Tin học")], ["Đạo đức", countOf("Đạo đức")]];
   } else {
-    const subjectText = [...dynamicCounts.entries()].map(([k,v]) => `${k}: ${v}`).join("; ");
-    details = [[subjectText || "Giảng dạy", data.length], ["Kiêm nhiệm", concurrent], ["", ""], ["", ""]];
+    const entries = [...dynamicCounts.entries()];
+    const subjectText = entries.map(([k]) => k).join("\n");
+    const countText = entries.map(([,v]) => String(v)).join("\n");
+    details = [[subjectText || "Giảng dạy", countText || data.length], ["Kiêm nhiệm", concurrent], ["", ""], ["", ""]];
   }
   const r = (n) => startRow + n,
     values = [];
@@ -4638,12 +4640,14 @@ function gsWeekRows(data, week, startRow) {
   const schedule = [];
   for (let t = 1; t <= 4; t++)
     schedule.push(days.map((day) => cell(day, "Sáng", t)));
-  for (let t = 1; t <= 3; t++)
+  const multiTeacherSheet = !isDamSheet;
+  for (let t = 1; t <= (multiTeacherSheet ? 4 : 3); t++)
     schedule.push(days.map((day) => cell(day, "Chiều", t)));
-  values.push({ range: `C${r(5)}:G${r(11)}`, values: schedule });
-  values.push({ range: `A${r(12)}`, values: [[""]] });
+  const scheduleLastOffset = multiTeacherSheet ? 12 : 11;
+  values.push({ range: `C${r(5)}:G${r(scheduleLastOffset)}`, values: schedule });
+  values.push({ range: `A${r(multiTeacherSheet ? 13 : 12)}`, values: [[""]] });
   details.forEach((x, i) => {
-    const row = r(15 + i);
+    const row = r((multiTeacherSheet ? 16 : 15) + i);
     values.push(
       { range: `B${row}`, values: [[i + 1]] },
       { range: `C${row}`, values: [[x[0]]] },
@@ -4651,8 +4655,8 @@ function gsWeekRows(data, week, startRow) {
     );
   });
   values.push(
-    { range: `C${r(19)}`, values: [["Tổng số"]] },
-    { range: `E${r(19)}`, values: [[data.length + concurrent]] },
+    { range: `C${r(multiTeacherSheet ? 20 : 19)}`, values: [["Tổng số"]] },
+    { range: `E${r(multiTeacherSheet ? 20 : 19)}`, values: [[data.length + concurrent]] },
   );
   return values;
 }
@@ -5522,10 +5526,11 @@ async function exportSelectedWeek1To35ToGoogleSheet(options = {}) {
     // BƯỚC 5.2.11: khôi phục đúng hai cột bên trái của Phụ lục 1.4 cho mọi tuần.
     // Cột A = Buổi (Sáng/Chiều), cột B = Tiết; hàng trên cùng của hai cột là "Thời gian".
     // Chỉ tác động A:B trong phần lịch, không thay đổi dữ liệu bài học C:G hay phần Tổng hợp.
+    const multiTeacherSheet = normalizeTeacherName(clean(selectedTeacher || TEACHER)) !== normalizeTeacherName(TEACHER);
     const leftHeaderRow = specialWeek1 ? 8 : startRow + 3;
     const leftSubHeaderRow = leftHeaderRow + 1;
     const leftScheduleStart = leftHeaderRow + 2;
-    const leftScheduleEnd = leftScheduleStart + 7;
+    const leftScheduleEnd = leftScheduleStart + (multiTeacherSheet ? 8 : 7);
     // BƯỚC 5.2.14C: giữ nguyên merge A:B đã được copy từ tab mẫu; chỉ áp lại định dạng và ghi nhãn bên dưới.
     const leftReq = [
       {
@@ -5955,7 +5960,7 @@ async function exportSelectedWeek1To35ToGoogleSheet(options = {}) {
       // phần Tổng số/TỔNG HỢP sẽ dựng chuẩn riêng ở hàng 18–25 bên dưới.
       weekRows = weekRows.filter((x) => {
         const m = String(x.range).match(/^[A-Z]+(\d+)/);
-        return !m || Number(m[1]) < 18;
+        return !m || Number(m[1]) < (multiTeacherSheet ? 19 : 18);
       });
       weekRows.unshift({
         range: "B6",
@@ -5977,16 +5982,16 @@ async function exportSelectedWeek1To35ToGoogleSheet(options = {}) {
       });
       const concurrent = getConcurrentPeriods();
       weekRows.push(
-        { range: "B18", values: [[`Tổng số: ${data.length} tiết`]] },
-        { range: "B19", values: [["TỔNG HỢP"]] },
+        { range: multiTeacherSheet ? "B19" : "B18", values: [[`Tổng số: ${data.length} tiết`]] },
+        { range: multiTeacherSheet ? "B20" : "B19", values: [["TỔNG HỢP"]] },
         {
-          range: "B20:H20",
+          range: multiTeacherSheet ? "B21:H21" : "B20:H20",
           values: [
             ["TT", "Nội dung", "", "Số lượng tiết học", "Ghi chú", "", ""],
           ],
         },
         {
-          range: "B21:H24",
+          range: multiTeacherSheet ? "B22:H25" : "B21:H24",
           values: normalizeTeacherName(clean(selectedTeacher || TEACHER)) === normalizeTeacherName(TEACHER)
             ? [
                 [1, "Tin học", "", counts["Tin học"], "", "", ""],
@@ -5997,12 +6002,14 @@ async function exportSelectedWeek1To35ToGoogleSheet(options = {}) {
             : (() => {
                 const m = new Map();
                 data.forEach((x) => { const k = clean(normalizeSubjectForPlan(x?.monHoc || x?.plan?.subject || "")) || "Môn học"; m.set(k, (m.get(k) || 0) + 1); });
-                const label = [...m.entries()].map(([k,v]) => `${k}: ${v}`).join("; ");
-                return [[1, label || "Giảng dạy", "", data.length, "", "", ""], [2, "Kiêm nhiệm", "", concurrent, "", "", ""], ["", "", "", "", "", "", ""], ["", "", "", "", "", "", ""]];
+                const entries = [...m.entries()];
+                const labels = entries.map(([k]) => k).join("\n");
+                const nums = entries.map(([,v]) => String(v)).join("\n");
+                return [[1, labels || "Giảng dạy", "", nums || data.length, "", "", ""], [2, "Kiêm nhiệm", "", concurrent, "", "", ""], ["", "", "", "", "", "", ""], ["", "", "", "", "", "", ""]];
               })(),
         },
         {
-          range: "B25:H25",
+          range: multiTeacherSheet ? "B26:H26" : "B25:H25",
           values: [["", "Tổng số", "", data.length + concurrent, "", "", ""]],
         },
       );
@@ -6019,23 +6026,24 @@ async function exportSelectedWeek1To35ToGoogleSheet(options = {}) {
         else if (k.includes("daoduc") || k === "dd") counts["Đạo đức"]++;
       });
       const concurrent = getConcurrentPeriods(),
-        r = (n) => startRow + n;
-      // Loại các dòng tổng hợp cũ do gsWeekRows tạo, rồi ghi lại một cấu trúc thống nhất cho Tuần 2–35.
+        r = (n) => startRow + n,
+        summaryShift = multiTeacherSheet ? 1 : 0;
+      // Đa giáo viên có thêm Tiết 8 nên phần Tổng hợp dịch xuống 1 dòng, vẫn nằm gọn trong khối 22 dòng.
       weekRows = weekRows.filter((x) => {
         const m = String(x.range).match(/^[A-Z]+(\d+)/);
-        return !m || Number(m[1]) < r(12);
+        return !m || Number(m[1]) < r(12 + summaryShift);
       });
       weekRows.push(
-        { range: `B${r(12)}`, values: [[`Tổng số: ${data.length} tiết`]] },
-        { range: `B${r(13)}`, values: [["TỔNG HỢP"]] },
+        { range: `B${r(12 + summaryShift)}`, values: [[`Tổng số: ${data.length} tiết`]] },
+        { range: `B${r(13 + summaryShift)}`, values: [["TỔNG HỢP"]] },
         {
-          range: `B${r(14)}:H${r(14)}`,
+          range: `B${r(14 + summaryShift)}:H${r(14 + summaryShift)}`,
           values: [
             ["TT", "Nội dung", "", "Số lượng tiết học", "Ghi chú", "", ""],
           ],
         },
         {
-          range: `B${r(15)}:H${r(18)}`,
+          range: `B${r(15 + summaryShift)}:H${r(18 + summaryShift)}`,
           values: normalizeTeacherName(clean(selectedTeacher || TEACHER)) === normalizeTeacherName(TEACHER)
             ? [
                 [1, "Tin học", "", counts["Tin học"], "", "", ""],
@@ -6046,12 +6054,14 @@ async function exportSelectedWeek1To35ToGoogleSheet(options = {}) {
             : (() => {
                 const m = new Map();
                 data.forEach((x) => { const k = clean(normalizeSubjectForPlan(x?.monHoc || x?.plan?.subject || "")) || "Môn học"; m.set(k, (m.get(k) || 0) + 1); });
-                const label = [...m.entries()].map(([k,v]) => `${k}: ${v}`).join("; ");
-                return [[1, label || "Giảng dạy", "", data.length, "", "", ""], [2, "Kiêm nhiệm", "", concurrent, "", "", ""], ["", "", "", "", "", "", ""], ["", "", "", "", "", "", ""]];
+                const entries = [...m.entries()];
+                const labels = entries.map(([k]) => k).join("\n");
+                const nums = entries.map(([,v]) => String(v)).join("\n");
+                return [[1, labels || "Giảng dạy", "", nums || data.length, "", "", ""], [2, "Kiêm nhiệm", "", concurrent, "", "", ""], ["", "", "", "", "", "", ""], ["", "", "", "", "", "", ""]];
               })(),
         },
         {
-          range: `B${r(19)}:H${r(19)}`,
+          range: `B${r(19 + summaryShift)}:H${r(19 + summaryShift)}`,
           values: [["", "Tổng số", "", data.length + concurrent, "", "", ""]],
         },
       );
@@ -6076,8 +6086,8 @@ async function exportSelectedWeek1To35ToGoogleSheet(options = {}) {
       },
       { range: `A${leftScheduleStart + 4}`, values: [["Chiều"]] },
       {
-        range: `B${leftScheduleStart + 4}:B${leftScheduleStart + 6}`,
-        values: [[5], [6], [7]],
+        range: `B${leftScheduleStart + 4}:B${leftScheduleStart + (multiTeacherSheet ? 7 : 6)}`,
+        values: multiTeacherSheet ? [[5], [6], [7], [8]] : [[5], [6], [7]],
       },
     );
     const payload = weekRows.map((x) => ({
@@ -6187,10 +6197,10 @@ async function exportSelectedWeek1To35ToGoogleSheet(options = {}) {
       },
       "userEnteredFormat.backgroundColorStyle,userEnteredFormat.horizontalAlignment,userEnteredFormat.verticalAlignment,userEnteredFormat.textFormat,userEnteredFormat.borders",
     );
-    const totalRow0 = specialWeek1 ? 17 : startRow + 11;
+    const totalRow0 = (specialWeek1 ? 17 : startRow + 11) + (multiTeacherSheet ? 1 : 0);
     const summaryTitle0 = totalRow0 + 1;
     const summaryHeader0 = totalRow0 + 2;
-    const summaryLast0 = specialWeek1 ? 24 : startRow + 18;
+    const summaryLast0 = (specialWeek1 ? 24 : startRow + 18) + (multiTeacherSheet ? 1 : 0);
     // Tổng số tiết dạy.
     addTheme(
       totalRow0,
@@ -7602,3 +7612,5 @@ resetGoogleSheetWeekRange = async function(firstWeek, lastWeek) {
     GOOGLE_SHEETS_TEACHER_GID = oldTeacherGid;
   }
 };
+
+// BƯỚC 5.6.2B.9C.2D.2 - Google Sheet đa GV: hỗ trợ Tiết 8; Tổng hợp hiển thị từng môn trên từng dòng trong ô, số tiết tương ứng; Đậm giữ nguyên.
