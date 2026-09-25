@@ -7411,3 +7411,64 @@ sharedCurriculumPackets561B5B = async function (weeks) {
 // Nút Excel ngoài giao diện (nếu được bật lại) cũng dùng bản đã lọc.
 const excelBtn561B7B = document.getElementById("excelBtn");
 if (excelBtn561B7B) excelBtn561B7B.onclick = () => exportExcel();
+
+// BƯỚC 5.6.2B.9C.1 - Google Sheet cá nhân thử nghiệm đa giáo viên.
+// Tách hoàn toàn khỏi mapping Google Sheet công vụ hiện tại.
+const MULTI_TEACHER_TEST_SPREADSHEET_ID = "1tIFyPOlJ8z4Eo5ml1eQLrOhPMvRUS5CnrG7DBk5jOo0";
+function multiTeacherTestSheetNames() {
+  const names = [...new Set((teacherCatalog || []).map(clean).filter(Boolean))];
+  if (selectedTeacher && !names.some((x) => normalizeTeacherName(x) === normalizeTeacherName(selectedTeacher))) {
+    names.push(selectedTeacher);
+  }
+  return names.sort((a, b) => a.localeCompare(b, "vi"));
+}
+async function initializeMultiTeacherTestGoogleSheet() {
+  const btn = document.querySelector("#outputPreviewModal .preview-google-multi-init");
+  const oldText = btn?.textContent;
+  try {
+    if (btn) { btn.disabled = true; btn.textContent = "Đang khởi tạo..."; }
+    const token = await getGoogleSheetsReadOnlyToken();
+    const headers = { Authorization: `Bearer ${token}`, "Content-Type": "application/json" };
+    const base = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(MULTI_TEACHER_TEST_SPREADSHEET_ID)}`;
+    let meta = await gsJson(`${base}?fields=properties.title,sheets.properties(sheetId,title,index)`, { headers });
+    const wanted = multiTeacherTestSheetNames();
+    if (!wanted.length) throw new Error("Chưa có danh sách giáo viên để khởi tạo.");
+    const existingKeys = new Set((meta.sheets || []).map((s) => googleSheetNameKey(s?.properties?.title)));
+    const requests = [];
+    for (const name of wanted) {
+      if (!existingKeys.has(googleSheetNameKey(name))) {
+        requests.push({ addSheet: { properties: { title: name, gridProperties: { rowCount: 1000, columnCount: 12 } } } });
+      }
+    }
+    if (requests.length) {
+      await gsJson(`${base}:batchUpdate`, { method: "POST", headers, body: JSON.stringify({ requests }) });
+    }
+    meta = await gsJson(`${base}?fields=properties.title,sheets.properties(sheetId,title,index)`, { headers });
+    const found = wanted.filter((name) => (meta.sheets || []).some((s) => googleSheetNameKey(s?.properties?.title) === googleSheetNameKey(name)));
+    alert(`KHỞI TẠO GOOGLE SHEET ĐA GIÁO VIÊN THÀNH CÔNG\n\nTệp: ${meta.properties?.title || "Google Sheet thử nghiệm"}\nĐã có: ${found.length}/${wanted.length} tab giáo viên.\n\nĐây là file cá nhân thử nghiệm; Google Sheet công vụ của Đậm không bị thay đổi.`);
+  } catch (err) {
+    console.error("Khởi tạo Google Sheet đa GV:", err);
+    alert(`Chưa khởi tạo được Google Sheet đa giáo viên.\n\n${err?.message || err}`);
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = oldText || "Khởi tạo Sheet đa GV"; }
+  }
+}
+function ensureMultiTeacherTestGoogleSheetButton() {
+  const bar = document.querySelector("#outputPreviewModal .output-preview-bar>div");
+  if (!bar || bar.querySelector(".preview-google-multi-init")) return;
+  const close = bar.querySelector(".preview-close");
+  const b = document.createElement("button");
+  b.type = "button";
+  b.className = "preview-google-multi-init";
+  b.textContent = "Khởi tạo Sheet đa GV";
+  b.title = "Tạo tab riêng cho toàn bộ giáo viên trong Google Sheet cá nhân thử nghiệm";
+  b.onclick = initializeMultiTeacherTestGoogleSheet;
+  bar.insertBefore(b, close || null);
+}
+const openOutputPreviewBeforeMultiTeacherTestInit = openOutputPreview;
+openOutputPreview = async function () {
+  await openOutputPreviewBeforeMultiTeacherTestInit();
+  ensureMultiTeacherTestGoogleSheetButton();
+};
+const previewBtnMultiTeacherTestInit = document.getElementById("previewBtn");
+if (previewBtnMultiTeacherTestInit) previewBtnMultiTeacherTestInit.onclick = openOutputPreview;
