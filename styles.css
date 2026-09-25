@@ -138,3 +138,139 @@ button:hover,select:hover{border-color:#9BC9AE}.toolbar button:hover{background:
 .curriculum-probe .pl2-details{margin-top:7px}
 .curriculum-probe .curriculum-miss{border-style:dashed}
 .curriculum-probe small{display:block;margin-top:7px;opacity:.75}
+
+/* BƯỚC 5.6.2B.9G.1 — Chuẩn hóa giao diện điện thoại.
+   Chỉ thay đổi trình bày responsive; không đổi ID, dữ liệu, parser hay chức năng xuất. */
+@media screen and (max-width:760px){
+  html,body{max-width:100%;overflow-x:hidden}
+  body{font-size:14px;-webkit-text-size-adjust:100%}
+  .app{width:100%;max-width:none;padding:10px 10px 24px!important}
+
+  /* Đầu trang + chọn giáo viên */
+  header{min-height:0!important;padding:14px!important;border-radius:12px!important;display:flex!important;flex-direction:column!important;align-items:stretch!important;gap:12px!important}
+  header h1{font-size:20px!important;line-height:1.22!important}
+  header p{margin-top:7px!important;display:grid!important;grid-template-columns:1fr!important;gap:6px!important;font-size:12px!important}
+  .teacher-select{margin-left:0!important;width:100%!important;min-width:0!important;height:44px!important;padding:0 36px 0 12px!important}
+  header>.upload{width:100%!important;height:44px!important;justify-content:center!important;text-align:center!important}
+
+  /* Trạng thái hệ thống + đăng nhập */
+  .system-strip{grid-template-columns:1fr!important;gap:8px!important;margin-top:8px!important}
+  .system-strip>.info,.system-strip>.auth-bar{min-height:0!important}
+  .system-file{white-space:normal!important;overflow:visible!important;text-overflow:clip!important;overflow-wrap:anywhere!important;padding:10px 12px!important}
+  .system-strip .auth-bar,.auth-bar{align-items:stretch!important;flex-direction:column!important;gap:9px!important;padding:10px 12px!important}
+  .system-strip .auth-status{white-space:normal!important;overflow-wrap:anywhere!important}
+  .auth-actions{width:100%!important;display:grid!important;grid-template-columns:minmax(0,1fr) minmax(0,1fr)!important;gap:8px!important}
+  .auth-user{grid-column:1/-1!important;max-width:none!important;white-space:normal!important;overflow:visible!important;text-overflow:clip!important;overflow-wrap:anywhere!important}
+  .auth-actions button{width:100%!important;min-width:0!important;height:44px!important;padding:0 10px!important;white-space:normal!important;line-height:1.15!important}
+
+  /* Trung tâm điều khiển */
+  .control-center{margin-top:8px!important;border-radius:12px!important}
+  .control-head{padding:12px!important;gap:8px!important}
+  .control-head h2{font-size:15px!important}
+  .control-head small,.control-hint{font-size:11px!important}
+  .control-grid{grid-template-columns:1fr!important}
+  .control-group{padding:12px!important}
+  .control-group+.control-group{border-left:0!important;border-top:1px solid #e6edf5!important}
+  .control-group-title{margin-bottom:9px!important}
+  .control-group-body,.repo-actions{display:grid!important;grid-template-columns:repeat(2,minmax(0,1fr))!important;align-items:end!important;gap:8px!important;width:100%!important}
+  .field-stack{width:100%!important;min-width:0!important}
+  .field-stack select,.field-stack input{width:100%!important;min-width:0!important;height:44px!important}
+  .control-upload,.soft-action,.repo-actions button{width:100%!important;min-width:0!important;height:44px!important;justify-content:center!important;text-align:center!important;white-space:normal!important;line-height:1.15!important;padding:0 10px!important}
+
+  /* Trạng thái PPCT */
+  .pl2-match,.curriculum-probe,.scan,.info{overflow-wrap:anywhere}
+  .pl2-match{padding:10px 12px!important}
+  .curriculum-probe{padding:10px 12px!important;gap:8px!important}
+  .curriculum-probe>span{min-width:0!important;width:100%!important}
+  .curriculum-probe>button{width:100%!important;height:44px!important;white-space:normal!important}
+
+  /* Thẻ thống kê */
+  .stats{grid-template-columns:repeat(2,minmax(0,1fr))!important;gap:8px!important;margin:8px 0!important}
+  .card{min-width:0!important;min-height:68px!important;padding:10px 11px!important}
+  .card b{font-size:18px!important;overflow-wrap:anywhere}
+  .card small{font-size:9px!important;line-height:1.25!important;display:block!important;overflow-wrap:anywhere}
+
+  /* Thanh lọc / hiển thị / xuất */
+  .professional-toolbar{display:grid!important;grid-template-columns:1fr!important;gap:10px!important;padding:10px!important;min-height:0!important;margin-top:8px!important}
+  .toolbar-divider,.professional-toolbar>.spacer{display:none!important}
+  .toolbar-section{width:100%!important;display:grid!important;grid-template-columns:repeat(2,minmax(0,1fr))!important;gap:8px!important;padding:0!important}
+  .toolbar-label{grid-column:1/-1!important;width:auto!important;margin:0 0 -2px!important;font-size:9px!important}
+  .professional-toolbar select,.professional-toolbar button{width:100%!important;min-width:0!important;height:44px!important;padding:0 8px!important;font-size:11px!important;white-space:normal!important;line-height:1.1!important}
+
+  /* Dạng bảng: giữ đủ cột, vuốt ngang thay vì bóp nhỏ */
+  .schedule-table-wrap{width:100%!important;overflow-x:auto!important;overflow-y:visible!important;-webkit-overflow-scrolling:touch!important;border-radius:10px!important}
+  .schedule-table{min-width:900px!important;width:900px!important;table-layout:fixed!important;font-size:12.5px!important}
+  .schedule-table th{position:static!important;height:42px!important;padding:8px!important;font-size:11.5px!important}
+  .schedule-table td{height:44px!important;padding:8px!important}
+  .schedule-table .day-cell{font-size:12px!important}.schedule-table .session-cell{font-size:11.5px!important}
+  .point-badge{white-space:normal!important;border-radius:7px!important;line-height:1.2!important}
+
+  /* Lịch tuần: vuốt ngang, không làm méo ô */
+  .matrix-view{margin-top:8px!important}
+  .matrix-heading{padding:12px!important;gap:7px!important;margin-bottom:8px!important}
+  .matrix-heading h2{font-size:16px!important}.matrix-heading p,.matrix-legend{font-size:11px!important}
+  .matrix-section{margin-bottom:10px!important}
+  .matrix-scroll{overflow-x:auto!important;-webkit-overflow-scrolling:touch!important}
+  .week-matrix{min-width:920px!important}
+  .week{grid-template-columns:1fr!important;gap:8px!important}
+
+  /* Hộp nguồn bài dạy */
+  .source-modal{padding:8px!important;align-items:flex-end!important}
+  .source-dialog{width:100%!important;max-width:none!important;max-height:92vh!important;border-radius:14px 14px 0 0!important;padding:16px 14px!important}
+  .source-title{flex-direction:column!important;gap:8px!important;padding-right:34px!important}
+  .source-title h3{font-size:18px!important}
+  .source-origin{gap:6px!important;margin:11px 0!important}.source-origin span{width:100%!important}
+  .source-grid{grid-template-columns:1fr!important;gap:8px!important}.source-wide{grid-column:auto!important}
+
+  /* Kho TKB / lịch năm học / đăng nhập */
+  .manage-modal{padding:8px!important;align-items:flex-end!important}
+  .manage-dialog{width:100%!important;max-width:none!important;max-height:94vh!important;border-radius:14px 14px 0 0!important;padding:12px!important;overflow:auto!important}
+  .manage-head{position:sticky!important;top:0!important;z-index:3!important;background:#fff!important;padding-bottom:9px!important}
+  .manage-scroll{max-height:62vh!important;overflow:auto!important;-webkit-overflow-scrolling:touch!important}
+  .manage-table{min-width:760px!important;font-size:12px!important}
+  .manage-table th,.manage-table td{padding:7px!important}
+  .manage-actions,.auth-modal-actions{display:grid!important;grid-template-columns:repeat(2,minmax(0,1fr))!important;gap:8px!important}
+  .manage-actions button,.auth-modal-actions button{width:100%!important;height:44px!important}
+  .break-row{align-items:stretch!important}.break-row>*{min-width:0!important;flex:1 1 140px!important}
+
+  /* Preview Phụ lục 1.4: ưu tiên điều khiển bằng điện thoại, trang A4 vẫn giữ nguyên kích thước */
+  #outputPreviewModal.output-preview-modal{padding:0!important;align-items:stretch!important}
+  #outputPreviewModal .output-preview-dialog{width:100vw!important;height:100dvh!important;max-width:none!important;border-radius:0!important}
+  #outputPreviewModal .output-preview-bar{align-items:flex-start!important;flex-direction:column!important;gap:8px!important;padding:9px 10px!important}
+  #outputPreviewModal .output-preview-bar>b{font-size:12px!important;line-height:1.25!important}
+  #outputPreviewModal .output-preview-bar>div{width:100%!important;display:grid!important;grid-template-columns:repeat(3,minmax(0,1fr))!important;gap:6px!important;justify-content:stretch!important}
+  #outputPreviewModal .output-preview-bar button{width:100%!important;height:42px!important;padding:0 6px!important;font-size:10.5px!important;white-space:normal!important;line-height:1.05!important;margin-left:0!important}
+  #outputPreviewModal .output-preview-scroll{padding:10px!important;-webkit-overflow-scrolling:touch!important}
+  #outputPreviewModal .output-preview-scroll .formal-output{margin:0!important;transform-origin:top left!important}
+  #outputPreviewModal .output-edit-panel{padding:10px!important}
+  #outputPreviewModal .output-edit-head{grid-template-columns:1fr!important;top:-10px!important}
+  #outputPreviewModal .output-edit-head>div{grid-row:auto!important;grid-column:auto!important;width:100%!important;display:grid!important;grid-template-columns:repeat(2,minmax(0,1fr))!important}
+  #outputPreviewModal .output-edit-head button{width:100%!important;height:42px!important}
+
+  /* Chọn nhiều tuần */
+  .multi-week-picker{padding:8px!important;align-items:end!important}
+  .multi-week-picker-card{width:100%!important;max-width:none!important;max-height:94vh!important;border-radius:14px 14px 0 0!important}
+  .multi-week-picker-head{padding:14px 14px 11px!important}.multi-week-picker-quick{padding-left:14px!important;padding-right:14px!important}
+  .multi-week-grid{grid-template-columns:repeat(4,minmax(0,1fr))!important;gap:6px!important;padding:8px 14px 14px!important}
+  .multi-week-grid label{justify-content:center!important;padding:9px 4px!important;font-size:12px!important}
+  .multi-week-picker-foot{padding:10px 14px 12px!important;align-items:stretch!important;flex-direction:column!important}
+  .multi-week-picker-foot>div{display:grid!important;grid-template-columns:repeat(2,minmax(0,1fr))!important}.multi-week-picker-foot button{width:100%!important;height:42px!important}
+
+  /* Làm mới Google Sheet */
+  #googleSheetResetRangeModal{padding:8px!important;align-items:end!important}
+  #googleSheetResetRangeModal .gs-reset-card{width:100%!important;max-width:none!important;border-radius:14px 14px 0 0!important;max-height:94vh!important;overflow:auto!important}
+  #googleSheetResetRangeModal .gs-reset-head{padding:14px!important}.gs-reset-body{padding:10px 14px!important}
+  .gs-reset-fields{padding-left:12px!important;grid-template-columns:1fr!important}.gs-reset-fields label{justify-content:space-between!important}.gs-reset-fields select{min-width:130px!important;height:42px!important}
+  .gs-reset-actions{display:grid!important;grid-template-columns:repeat(2,minmax(0,1fr))!important;padding:10px 14px 14px!important}.gs-reset-actions button{width:100%!important;height:44px!important;padding:0 8px!important}
+}
+
+@media screen and (max-width:480px){
+  .app{padding-left:8px!important;padding-right:8px!important}
+  header{padding:12px!important}header h1{font-size:18px!important}
+  .control-group-body,.repo-actions{grid-template-columns:1fr!important}
+  .stats{grid-template-columns:repeat(2,minmax(0,1fr))!important}
+  .toolbar-section{grid-template-columns:1fr!important}.toolbar-label{grid-column:1!important}
+  #outputPreviewModal .output-preview-bar>div{grid-template-columns:repeat(2,minmax(0,1fr))!important}
+  .multi-week-grid{grid-template-columns:repeat(3,minmax(0,1fr))!important}
+  .auth-actions{grid-template-columns:1fr!important}.auth-user{grid-column:1!important}
+}
