@@ -3412,11 +3412,17 @@ function isOptionalPracticeSubject(subject) {
   return k === "ltt" || k === "lttv";
 }
 function excelLessonCellFormal(data, day, session, tiet) {
+  // BƯỚC 5.6.2B.9E.1F: với khung Excel cố định 1–7, số tiết là nguồn xác định
+  // vị trí hàng. Không lọc lại theo nhãn buổi cũ vì một số bản ghi phục hồi có
+  // buổi không đồng nhất; điều đó từng làm Tiết 6–7 có trên Preview nhưng trống Excel.
+  // Khung đã cố định: 1–4 = Sáng, 5–7 = Chiều.
+  const period = Number(tiet);
+  const expectedSession = period <= 4 ? "Sáng" : "Chiều";
+  if (normKey(session) !== normKey(expectedSession)) return "";
   const items = data.filter(
     (x) =>
       x.thu === day &&
-      normKey(x.buoi) === normKey(session) &&
-      Number(x.tiet) === Number(tiet),
+      Number(x.tiet) === period,
   );
   return items
     .map((x) => {
