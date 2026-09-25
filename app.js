@@ -815,6 +815,10 @@ function restoredVersionMeta(version, lessons) {
 }
 async function restoreScheduleRepositoryFromSupabase() {
   if (!supabaseClient || !currentAuthUser) return { versions: 0, lessons: 0 };
+  // BƯỚC 5.6.2B.9E.1A: giữ snapshot cache của đúng tài khoản trước khi tải Supabase.
+  // Khi đóng trình duyệt/mở lại, cache này có thể chứa bản đa giáo viên mới hơn
+  // (ví dụ C Hiếu 18 tiết) trong khi Supabase vẫn còn bản cũ chỉ 2 tiết.
+  const localBeforeRestore = scheduleVersions.map((v) => ({ ...v }));
   const schoolYearId = await ensureSupabaseSchoolYear();
   const { data: versions, error: vErr } = await supabaseClient
     .from("tkb_timetable_versions")
@@ -873,6 +877,46 @@ async function restoreScheduleRepositoryFromSupabase() {
       return item;
     })
     .filter((v) => v.lessons.length || Object.keys(v.lessonsByTeacher || {}).length);
+
+  // Nếu cache cục bộ có cùng phiên bản nhưng dữ liệu đa giáo viên đầy đủ hơn Supabase,
+  // ưu tiên cache đó và tự đồng bộ ngược lên Supabase. Đây là điểm khác biệt giữa F5
+  // (RAM/cache còn đúng) và đóng trình duyệt rồi mở lại (trước đây Supabase cũ ghi đè cache).
+  const rowsInTeacherMap = (map) =>
+    Object.values(map || {}).reduce(
+      (n, arr) => n + (Array.isArray(arr) ? arr.filter((x) => Number(x?.tiet) <= 7).length : 0),
+      0,
+    );
+  const sanitizeTeacherMap = (map) => {
+    const out = {};
+    Object.entries(map || {}).forEach(([teacherName, teacherLessons]) => {
+      if (!Array.isArray(teacherLessons)) return;
+      out[teacherName] = sortSchedule(teacherLessons.filter((x) => Number(x?.tiet) <= 7));
+    });
+    return out;
+  };
+  const versionsToHeal = [];
+  restored.forEach((item) => {
+    const local = localBeforeRestore.find(
+      (x) =>
+        (x.supabaseId && String(x.supabaseId) === String(item.supabaseId)) ||
+        (x.fingerprint && item.fingerprint &&
+          x.fingerprint === item.fingerprint &&
+          Number(x.startWeek) === Number(item.startWeek)),
+    );
+    if (!local?.lessonsByTeacher) return;
+    const localMap = sanitizeTeacherMap(local.lessonsByTeacher);
+    const remoteMap = sanitizeTeacherMap(item.lessonsByTeacher);
+    if (rowsInTeacherMap(localMap) <= rowsInTeacherMap(remoteMap)) return;
+
+    item.lessonsByTeacher = localMap;
+    item.teachers = Object.keys(localMap);
+    const selectedKey = Object.keys(localMap).find(
+      (k) => normalizeTeacherName(k) === normalizeTeacherName(TEACHER),
+    );
+    item.lessons = selectedKey ? localMap[selectedKey] : Object.values(localMap)[0] || [];
+    versionsToHeal.push(item);
+  });
+
   const restoredTeachers = [...new Set(restored.flatMap((v) => v.teachers || []))];
   if (restoredTeachers.length) updateTeacherSelector(restoredTeachers);
   // Supabase là nguồn lâu dài sau khi đăng nhập; localStorage được cập nhật lại làm bản dự phòng.
@@ -885,6 +929,17 @@ async function restoreScheduleRepositoryFromSupabase() {
       String(a.uploadedAt || "").localeCompare(String(b.uploadedAt || "")),
   );
   saveScheduleRepository();
+
+  // Tự chữa kho Supabase bằng bản cache đầy đủ hơn. Nếu mạng tạm lỗi vẫn giữ cache đúng
+  // để người dùng làm việc; lần mở sau có thể đồng bộ lại.
+  for (const version of versionsToHeal) {
+    try {
+      await syncTimetableTeacherRowsToSupabase(version);
+    } catch (healErr) {
+      console.warn("[TKB] Chưa đồng bộ ngược được bản đa giáo viên đầy đủ lên Supabase", healErr);
+    }
+  }
+
   activateSelectedWeek();
   // BƯỚC 5.6.2B.9E.1: sau F5 phải sẵn sàng đúng dữ liệu của GV đang chọn,
   // không yêu cầu tải lại Excel mới làm mới phạm vi môn/kế hoạch.
@@ -3797,8 +3852,10 @@ function printSchedule() {
 $("loginBtn") && ($("loginBtn").onclick = openAuthModal);
 $("logoutBtn") && ($("logoutBtn").onclick = logoutTeacher);
 initWeekSelect();
-initSupabaseConnection();
+// BƯỚC 5.6.2B.9E.1A: nạp cache đúng tài khoản/thiết bị trước, rồi mới cho Supabase
+// đối chiếu và bổ sung. Không để phản hồi Supabase cũ ghi đè bản đa giáo viên vừa lưu.
 loadScheduleRepository();
+initSupabaseConnection();
 loadSchoolCalendar();
 activateSelectedWeek();
 $("fileInput").addEventListener(
