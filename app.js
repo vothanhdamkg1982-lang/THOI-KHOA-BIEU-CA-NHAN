@@ -3033,7 +3033,11 @@ function exportExcel() {
     rows.push([
       "Chiều",
       maxMorning + t,
-      ...days.map((day) => excelLessonCellFormal(d, day, "Chiều", maxMorning + t)),
+      // BƯỚC 5.6.2B.9E.1G: dùng đúng cùng quy ước dữ liệu với Preview.
+      // Trong dữ liệu TKB, tiết buổi Chiều được lưu theo chỉ số trong buổi
+      // (1,2,3) nhưng khi hiển thị phải mang nhãn tuyệt đối 5,6,7.
+      // Vì vậy ô Excel tra dữ liệu theo t=1..3, còn cột Tiết vẫn ghi 5..7.
+      ...days.map((day) => excelLessonCellFormal(d, day, "Chiều", t)),
       "",
     ]);
   const totalRow = rows.length + 1;
@@ -3412,17 +3416,15 @@ function isOptionalPracticeSubject(subject) {
   return k === "ltt" || k === "lttv";
 }
 function excelLessonCellFormal(data, day, session, tiet) {
-  // BƯỚC 5.6.2B.9E.1F: với khung Excel cố định 1–7, số tiết là nguồn xác định
-  // vị trí hàng. Không lọc lại theo nhãn buổi cũ vì một số bản ghi phục hồi có
-  // buổi không đồng nhất; điều đó từng làm Tiết 6–7 có trên Preview nhưng trống Excel.
-  // Khung đã cố định: 1–4 = Sáng, 5–7 = Chiều.
-  const period = Number(tiet);
-  const expectedSession = period <= 4 ? "Sáng" : "Chiều";
-  if (normKey(session) !== normKey(expectedSession)) return "";
+  // BƯỚC 5.6.2B.9E.1G: Excel dùng cùng điều kiện chọn tiết như Preview.
+  // Không chuyển "Tiết" thành số tuyệt đối trước khi tra dữ liệu, vì parser
+  // lưu tiết theo từng buổi: Sáng 1–4, Chiều 1–3. Nhãn Excel 5–7 chỉ là
+  // nhãn trình bày của ba hàng Chiều.
   const items = data.filter(
     (x) =>
       x.thu === day &&
-      Number(x.tiet) === period,
+      normKey(x.buoi) === normKey(session) &&
+      Number(x.tiet) === Number(tiet),
   );
   return items
     .map((x) => {
