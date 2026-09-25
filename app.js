@@ -1920,9 +1920,24 @@ function extractTeacherLessons(sheetName, ws, teacherName = selectedTeacher, kno
           ? [ch.gvcn]
           : [];
       const targetTeacher = normalizeTeacherName(teacherName);
-      const belongsToTeacher = assignedTeachers.some(
+      let belongsToTeacher = assignedTeachers.some(
         (n) => normalizeTeacherName(n) === targetTeacher,
       );
+
+      // BƯỚC 5.6.2B.9D.1: TKB 28.9 ghi riêng cô C Hiếu bằng đúng mẫu
+      // “( C Hiếu)” ở 19 ô tiết dạy tại BN. Không được đồng nhất với T.Hiếu
+      // (các ô M.T/MT “(Hiếu)”). Kiểm tra trực tiếp mẫu nguồn này làm fallback
+      // để không phụ thuộc danh sách tên ở bảng Cộng hoặc cách chuẩn hóa tên.
+      const targetKey = normKey(teacherName).replace(/\s+/g, "");
+      const sourceKey = normKey(src);
+      if (
+        !belongsToTeacher &&
+        targetKey === "chieu" &&
+        /\(\s*c\s+hieu\s*\)?/u.test(sourceKey)
+      ) {
+        belongsToTeacher = true;
+      }
+
       if (!belongsToTeacher || breakRow) continue;
       let tiet = resolveTiet(row, r, rows, hm, state),
         mon = extractSubject(src, assignedTeachers);
