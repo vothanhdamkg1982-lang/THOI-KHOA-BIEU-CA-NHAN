@@ -6261,6 +6261,9 @@ async function exportSelectedWeek1To35ToGoogleSheet(options = {}) {
       "userEnteredFormat.backgroundColorStyle,userEnteredFormat.horizontalAlignment,userEnteredFormat.verticalAlignment,userEnteredFormat.textFormat,userEnteredFormat.borders",
     );
     // Nội dung tổng hợp.
+    // BƯỚC 5.6.2B.9C.2D.3: đa giáo viên có thể có nhiều hơn 4 môn.
+    // Giữ nguyên khối 22 dòng/tuần để không làm lệch Tuần 1–35, nhưng cho mỗi môn
+    // hiển thị thành một dòng trong ô và tự tăng chiều cao dòng tổng hợp đầu tiên.
     if (summaryLast0 > summaryHeader0 + 1)
       addTheme(
         summaryHeader0 + 1,
@@ -6271,6 +6274,7 @@ async function exportSelectedWeek1To35ToGoogleSheet(options = {}) {
           backgroundColorStyle: { rgbColor: gsMint2 },
           horizontalAlignment: "CENTER",
           verticalAlignment: "MIDDLE",
+          wrapStrategy: "WRAP",
           textFormat: {
             foregroundColorStyle: { rgbColor: gsDark },
             fontFamily: "Times New Roman",
@@ -6278,8 +6282,26 @@ async function exportSelectedWeek1To35ToGoogleSheet(options = {}) {
           },
           borders: allGreenBorders,
         },
-        "userEnteredFormat.backgroundColorStyle,userEnteredFormat.horizontalAlignment,userEnteredFormat.verticalAlignment,userEnteredFormat.textFormat,userEnteredFormat.borders",
+        "userEnteredFormat.backgroundColorStyle,userEnteredFormat.horizontalAlignment,userEnteredFormat.verticalAlignment,userEnteredFormat.wrapStrategy,userEnteredFormat.textFormat,userEnteredFormat.borders",
       );
+    if (multiTeacherSheet) {
+      const summarySubjects = new Set(
+        data.map((x) => clean(normalizeSubjectForPlan(x?.monHoc || x?.plan?.subject || "")) || "Môn học"),
+      );
+      const visibleLines = Math.max(1, summarySubjects.size);
+      themeReq.push({
+        updateDimensionProperties: {
+          range: {
+            sheetId: GOOGLE_SHEETS_TEACHER_GID,
+            dimension: "ROWS",
+            startIndex: summaryHeader0 + 1,
+            endIndex: summaryHeader0 + 2,
+          },
+          properties: { pixelSize: Math.max(28, visibleLines * 22) },
+          fields: "pixelSize",
+        },
+      });
+    }
     // Dòng Tổng số cuối bảng tổng hợp.
     addTheme(
       summaryLast0,
