@@ -7472,3 +7472,27 @@ openOutputPreview = async function () {
 };
 const previewBtnMultiTeacherTestInit = document.getElementById("previewBtn");
 if (previewBtnMultiTeacherTestInit) previewBtnMultiTeacherTestInit.onclick = openOutputPreview;
+
+// BƯỚC 5.6.2B.9C.2A - Đồng bộ kiểm tra trước khi ghi Google Sheet với kho PPCT chung.
+// Chỉ thay nguồn dữ liệu trong lúc ghi: dùng đúng dữ liệu PPCT đang hiển thị ở Xem trước.
+// Không thay cấu hình Google Sheet công vụ, không thay parser TKB, tổng số hay kiêm nhiệm.
+const exportSelectedWeek1To35ToGoogleSheetBefore562B9C2A = exportSelectedWeek1To35ToGoogleSheet;
+exportSelectedWeek1To35ToGoogleSheet = async function (options = {}) {
+  try {
+    const sharedData = validFormalOutputData561B7B(await sharedCurriculumPreviewData());
+    if (!sharedData.length) {
+      throw new Error(`Tuần ${Number(options.week || $("weekSelect")?.value || 0) || ""} không có dữ liệu PPCT hợp lệ để ghi.`);
+    }
+    // outputScheduleData() đã có cơ chế ưu tiên biến tạm này ở Bước 5.6.2B.5A.
+    // Tái sử dụng để bộ kiểm tra noTitle và dữ liệu ghi nhìn cùng một nguồn PPCT với Preview/Excel/PDF/In.
+    excelSharedCurriculumData561B5A = sharedData;
+    return await exportSelectedWeek1To35ToGoogleSheetBefore562B9C2A(options);
+  } catch (err) {
+    console.error("[TKB] 5.6.2B.9C.2A - Google Sheet/PPCT chung:", err);
+    if (options.throwOnError) throw err;
+    alert(`CHƯA GHI ĐƯỢC TUẦN ${Number(options.week || $("weekSelect")?.value || 0) || ""}\n\n${err?.message || err}`);
+    return false;
+  } finally {
+    excelSharedCurriculumData561B5A = null;
+  }
+};
