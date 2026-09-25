@@ -3510,22 +3510,20 @@ function buildFormalOutput(data) {
   // BƯỚC 5.6.2B.7A: chỉ các tiết có môn học hợp lệ mới được đưa vào
   // Phụ lục 1.4/TỔNG HỢP. Loại các ô rác từ bảng Cộng như 1,2,3,4,
   // "18+4CN=22"...; không ép tổng theo bảng Cộng.
-  data = (data || []).filter((x) => isValidOutputSubject(x.monHoc));
+  // BƯỚC 5.6.2B.9E.1C: lọc ngay tại hàm dựng Phụ lục 1.4.
+  // Một số luồng xem trước đa tuần/khôi phục gọi buildFormalOutput trực tiếp,
+  // nên bộ lọc ở outputScheduleData chưa đủ để loại Tiết 8 cũ.
+  data = (data || []).filter((x) =>
+    isValidOutputSubject(x.monHoc) &&
+    Number(x.tiet) >= 1 && Number(x.tiet) <= 7
+  );
   const wd = selectedWeekDates(),
     days = ["Hai", "Ba", "Tư", "Năm", "Sáu"],
     labels = ["Thứ hai", "Thứ ba", "Thứ tư", "Thứ năm", "Thứ sáu"];
-  const morning = Math.max(
-      4,
-      ...data
-        .filter((x) => normKey(x.buoi) === "sang")
-        .map((x) => Number(x.tiet) || 0),
-    ),
-    afternoon = Math.max(
-      3,
-      ...data
-        .filter((x) => normKey(x.buoi) === "chieu")
-        .map((x) => Number(x.tiet) || 0),
-    );
+  // TKB chính thức hiện dùng cố định 7 tiết/ngày: Sáng 1–4, Chiều 5–7.
+  // Không suy số hàng từ dữ liệu cũ vì một bản ghi Tiết 8 tồn dư sẽ làm mọc lại hàng 8.
+  const morning = 4,
+    afternoon = 3;
   const subjects = [
     ...new Set(data.map((x) => normalizeSubjectForPlan(x.monHoc))),
   ].filter(Boolean);
