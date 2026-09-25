@@ -2010,7 +2010,8 @@ function extractTeacherLessons(sheetName, ws, teacherName = selectedTeacher, kno
       // BƯỚC 5.6.2B.9E.1: theo TKB 28.9 đã chỉnh sửa, lịch chính thức chỉ có Tiết 1–7.
       // resolveTiet trước đây có thể suy diễn một dòng trống Tiết thành Tiết 8 theo thứ tự thời gian.
       // Bỏ dòng suy diễn >7 ngay tại parser để lần lưu kế tiếp không ghi lại Tiết 8 giả lên Supabase.
-      if (Number(tiet) > 7) continue;
+      const displayTiet = normKey(buoi) === "chieu" ? 4 + Number(tiet || 0) : Number(tiet || 0);
+      if (displayTiet < 1 || displayTiet > 7) continue;
       let ri = state.lastResolveInfo || {};
       let item = {
         thu,
@@ -2066,7 +2067,10 @@ function sortSchedule(a) {
 }
 function filterSchedule() {
   return sortSchedule(
-    allLessons.filter((x) => isValidOutputSubject(x?.monHoc)).filter(
+    allLessons
+      .filter((x) => isValidOutputSubject(x?.monHoc))
+      .filter((x) => isOfficialOutputPeriod(x))
+      .filter(
       (x) =>
         (!$("fThu").value || x.thu === $("fThu").value) &&
         (!$("fBuoi").value || clean(x.buoi) === $("fBuoi").value) &&
@@ -2107,7 +2111,9 @@ function pointBadge(s, compact = false) {
 function renderStats() {
   // BƯỚC 5.6.2B.8A: giao diện chính dùng cùng bộ lọc môn hợp lệ
   // với Xem trước/Excel/PDF/In; không tính các ô rác của bảng Cộng.
-  const dashboardLessons = allLessons.filter((x) => isValidOutputSubject(x?.monHoc));
+  const dashboardLessons = allLessons
+    .filter((x) => isValidOutputSubject(x?.monHoc))
+    .filter((x) => isOfficialOutputPeriod(x));
   let p = (x) =>
     dashboardLessons.filter((y) => normKey(y.diemTruong).includes(x)).length;
   let vals = [
@@ -2903,6 +2909,22 @@ function saveOutputEdits(edits) {
     console.warn("[TKB] Không lưu được điều chỉnh bản kế hoạch tuần", e);
   }
 }
+// BƯỚC 5.6.2B.9E.2: Chuẩn hóa một nguồn duy nhất cho số Tiết hiển thị.
+// Dữ liệu TKB lưu Tiết theo từng buổi: Sáng 1–4, Chiều 1–3.
+// Khi xuất Phụ lục 1.4: Chiều 1–3 phải hiển thị thành Tiết 5–7.
+// Mọi đầu ra dùng chung quy tắc này để không còn lệch Preview/Excel/Google Sheet.
+function outputDisplayPeriod(x) {
+  const t = Number(x?.tiet) || 0;
+  const session = normKey(x?.buoi);
+  if (session === "sang") return t;
+  if (session === "chieu") return t ? 4 + t : 0;
+  return t;
+}
+function isOfficialOutputPeriod(x) {
+  const p = outputDisplayPeriod(x);
+  return p >= 1 && p <= 7;
+}
+
 function outputScheduleData() {
   applyLessonPlan();
   const edits = loadOutputEdits();
@@ -2933,7 +2955,7 @@ function outputScheduleData() {
     // BƯỚC 5.6.2B.9E.1B: TKB chính thức mới chỉ có Tiết 1–7.
     // Lọc ngay tại nguồn dữ liệu đầu ra để Preview/Excel/PDF/In/Google Sheet
     // không thể tái hiện Tiết 8 còn sót trong cache/phiên cũ.
-    .filter((x) => x && Number(x.tiet) >= 1 && Number(x.tiet) <= 7);
+    .filter((x) => x && isOfficialOutputPeriod(x));
 }
 function outputEditRowsHtml() {
   applyLessonPlan();
@@ -3033,10 +3055,6 @@ function exportExcel() {
     rows.push([
       "Chiều",
       maxMorning + t,
-      // BƯỚC 5.6.2B.9E.1G: dùng đúng cùng quy ước dữ liệu với Preview.
-      // Trong dữ liệu TKB, tiết buổi Chiều được lưu theo chỉ số trong buổi
-      // (1,2,3) nhưng khi hiển thị phải mang nhãn tuyệt đối 5,6,7.
-      // Vì vậy ô Excel tra dữ liệu theo t=1..3, còn cột Tiết vẫn ghi 5..7.
       ...days.map((day) => excelLessonCellFormal(d, day, "Chiều", t)),
       "",
     ]);
@@ -3416,10 +3434,8 @@ function isOptionalPracticeSubject(subject) {
   return k === "ltt" || k === "lttv";
 }
 function excelLessonCellFormal(data, day, session, tiet) {
-  // BƯỚC 5.6.2B.9E.1G: Excel dùng cùng điều kiện chọn tiết như Preview.
-  // Không chuyển "Tiết" thành số tuyệt đối trước khi tra dữ liệu, vì parser
-  // lưu tiết theo từng buổi: Sáng 1–4, Chiều 1–3. Nhãn Excel 5–7 chỉ là
-  // nhãn trình bày của ba hàng Chiều.
+  // BƯỚC 5.6.2B.9E.2: tra tiết y hệt Preview.
+  // `tiet` ở đây là số tiết TRONG BUỔI: Sáng 1–4, Chiều 1–3.
   const items = data.filter(
     (x) =>
       x.thu === day &&
@@ -3516,8 +3532,7 @@ function buildFormalOutput(data) {
   // Một số luồng xem trước đa tuần/khôi phục gọi buildFormalOutput trực tiếp,
   // nên bộ lọc ở outputScheduleData chưa đủ để loại Tiết 8 cũ.
   data = (data || []).filter((x) =>
-    isValidOutputSubject(x.monHoc) &&
-    Number(x.tiet) >= 1 && Number(x.tiet) <= 7
+    isValidOutputSubject(x.monHoc) && isOfficialOutputPeriod(x)
   );
   const wd = selectedWeekDates(),
     days = ["Hai", "Ba", "Tư", "Năm", "Sáu"],
@@ -7754,7 +7769,7 @@ async function writeMultiTeacherGoogleSheet569D4(options={}) {
   if (!Number.isInteger(week)||week<1||week>35) throw new Error("Chỉ hỗ trợ Tuần 1–35.");
   const data=outputScheduleData().map(x=>({...x})).filter(x=>isValidOutputSubject(x.monHoc));
   if (!data.length) throw new Error(`Tuần ${week} không có tiết dạy để ghi.`);
-  const over7=data.filter(x=>Number(x.tiet)>7);
+  const over7=data.filter(x=>!isOfficialOutputPeriod(x));
   if (over7.length) throw new Error(`DỪNG GHI: còn ${over7.length} tiết lớn hơn Tiết 7 trong TKB nguồn. Hãy kiểm tra TKB trước khi ghi Google Sheet.`);
   const noTitle=data.filter(x=>!clean(x.plan?.title));
   if (noTitle.length) throw new Error(`DỪNG GHI: còn ${noTitle.length} tiết chưa ghép tên bài PPCT chung.`);
@@ -7780,7 +7795,8 @@ async function writeMultiTeacherGoogleSheet569D4(options={}) {
   const dayKeys=["Hai","Ba","Tư","Năm","Sáu"];
   for(let t=1;t<=7;t++){
     const r=4+t; rows[r][0]=t===1?"Sáng":t===5?"Chiều":""; rows[r][1]=t;
-    dayKeys.forEach((d,i)=>rows[r][2+i]=multiGsLessonText569D4(data,d,t<=4?"Sáng":"Chiều",t));
+    const session=t<=4?"Sáng":"Chiều", relativeTiet=t<=4?t:t-4;
+    dayKeys.forEach((d,i)=>rows[r][2+i]=multiGsLessonText569D4(data,d,session,relativeTiet));
   }
   rows[12][0]=`Tổng số: ${data.length} tiết`;
   rows[13][0]="TỔNG HỢP";
