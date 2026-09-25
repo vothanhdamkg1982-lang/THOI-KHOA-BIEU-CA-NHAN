@@ -2986,15 +2986,11 @@ function exportExcel() {
   const m = month.length ? Number(month[1]) : "";
   const y = month.length ? Number(month[2]) : "";
   const yearText = y ? `${y} - ${y + 1}` : "2026 - 2027";
-  const maxMorning = Math.max(
-    4,
-    ...d
-      .filter((x) => normKey(x.buoi) === "sang")
-      .map((x) => Number(x.tiet) || 0),
-  );
-  // BƯỚC 5.6.2B.9E.1D: TKB chính thức chỉ có 7 tiết/ngày.
-  // Buổi chiều luôn gồm đúng Tiết 5–7; không lấy số tiết tuyệt đối (5/6/7)
-  // làm số lượng hàng, vì cách cũ khiến Excel sinh thêm hàng Tiết 8 trở lên.
+  // BƯỚC 5.6.2B.9E.1E: Excel phải dùng đúng khung tiết tuyệt đối 1–7,
+  // không suy số hàng từ dữ liệu buổi Sáng. Một số bản ghi cũ có nhãn buổi sai
+  // làm maxMorning thành 5, khiến ba hàng Chiều bị đánh số 6–8.
+  // Khung chính thức: Sáng 1–4, Chiều 5–7.
+  const maxMorning = 4;
   const maxAfternoon = 3;
   const rows = [];
   // Tuần xuất phải lấy trực tiếp từ bộ chọn Tuần 1–35, không suy ra từ tên file TKB.
