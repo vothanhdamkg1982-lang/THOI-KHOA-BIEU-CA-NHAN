@@ -1,0 +1,16 @@
+KIỂM THỬ BẢN CẬP NHẬT PHỤ LỤC 2 LỚP 2/3 - 29/10/2026
+[ĐẠT] node --check app.js
+[ĐẠT] Đọc Word thực bằng DOMParser + nguồn XML: 455/455 bản ghi, 13 phần.
+[ĐẠT] HĐTN 1/2/3 lớp 2 và lớp 3: mỗi mạch đủ 35 tuần.
+[ĐẠT] HĐTN 1/2/3 lớp 2 có cùng nội dung: phát hiện và cảnh báo.
+[ĐẠT] Lớp 3B1 thứ Hai (sáng, 1) => HĐTN 1 lớp 3.
+[ĐẠT] Lớp 3B1 thứ Tư (sáng, 3) => HĐTN 2 lớp 3.
+[ĐẠT] Lớp 2C thứ Năm (sáng, 1) => HĐTN 2 lớp 2.
+[ĐẠT] Không tự gán các ô HĐTN khác của lớp 2C.
+[ĐẠT] Không áp phân công riêng của Đậm sang giáo viên khác.
+[ĐẠT] Ghép đúng ba tên bài ở tuần 12, đối chiếu Word gốc.
+[ĐẠT] Tuần 22 lớp 3 thiếu chi tiết: cảnh báo; lớp 2 HĐTN2 vẫn ghép bài.
+[ĐẠT] Kiểm tra key ghép cả 35 tuần.
+[CHƯA THỬ] Supabase thật; đồng bộ giữa các thiết bị thực tế.
+[CHƯA THỬ] Toàn bộ website qua localhost (môi trường chặn).
+[CHƯA THỬ] Xuất thực tế PDF/Excel và Google Sheets.

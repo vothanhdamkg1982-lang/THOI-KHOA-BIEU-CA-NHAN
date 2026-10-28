@@ -1,0 +1,11 @@
+KIỂM THỬ SỬA LỖI HĐTN KHÔNG HIỂN THỊ - 29/10/2026
+[ĐẠT] node --check app.js.
+[ĐẠT] 14 tên môn, gồm HĐTN chung/HĐTN 1/2/3 và tên đầy đủ, được phân loại đúng; các giá trị rác không đi vào bảng.
+[ĐẠT] Tình huống 19 môn thông thường + 3 HĐTN => 22/22 tiết hợp lệ.
+[ĐẠT] Bộ kiểm thử Phụ lục 2: 13 phần, 455 dòng, đủ 35 tuần mỗi loại HĐTN 1/2/3 của lớp 2/3.
+[ĐẠT] Phân công lớp 3B1 thứ Hai HĐTN1, thứ Tư HĐTN2; lớp 2C thứ Năm HĐTN2.
+[ĐẠT] Ghép đúng mạch + lớp + tuần cả 35 tuần; tuần 22 lớp 3 giữ cảnh báo thiếu chi tiết.
+[CHƯA KIỂM THỬ] Trang web triển khai, Supabase thật, trình duyệt/máy thực của người dùng.
+[CHƯA KIỂM THỬ] Luồng thực tế xuất PDF/Excel/Google Sheets.
+
+LƯU Ý: Thông báo "chưa ghép" là vấn đề dữ liệu Phụ lục 2: cần tải bản mới gồm 455 dòng vào app. Sửa bộ lọc chỉ giúp 3 tiết HĐTN hiện trên TKB, không tự tạo tên bài khi dữ liệu PL2 thiếu.

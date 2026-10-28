@@ -1,0 +1,67 @@
+THỜI KHÓA BIỂU CÁ NHÂN - GIÁO VIÊN ĐẬM
+BẢN CẬP NHẬT PHỤ LỤC 2 CÓ HĐTN LỚP 2 VÀ LỚP 3
+Ngày 29/10/2026
+
+1. NỘI DUNG BẢN CẬP NHẬT
+- Nhập được 13 phần kế hoạch (455 dòng = 13 x 35 tuần) trong Phụ lục 2 Word mới.
+- HĐTN 1, HĐTN 2, HĐTN 3 là ba loại tiết TRONG CÙNG MỘT KHỐI LỚP;
+  không phải tên gọi ba khối lớp 1, 2, 3.
+- Ghép nội dung theo ba khóa: LOẠI TIẾT HĐTN + KHỐI LỚP + TUẦN.
+- Giữ nguyên nội dung Word, không tự sửa/tự sáng tác tên bài.
+- Khi hiển thị lịch tuần và các bản xuất được cập nhật, ghi rõ HĐTN 1 hoặc HĐTN 2.
+- Giữ cơ chế chọn và đồng bộ tuần dạy đa máy đã có ở bản cũ.
+
+2. PHÂN CÔNG CÁ NHÂN ĐÃ ĐƯỢC GIÁO VIÊN XÁC NHẬN
+- Thứ Hai, sáng tiết 1, 3B1, điểm Thiên Tuế: HĐTN 1 lớp 3 (Sinh hoạt dưới cờ).
+- Thứ Tư, sáng tiết 3, 3B1, điểm Thiên Tuế: HĐTN 2 lớp 3 (Hoạt động giáo dục theo chủ đề).
+- Thứ Năm, sáng tiết 1, 2C, điểm Bãi Bấc: HĐTN 2 lớp 2 (Hoạt động giáo dục theo chủ đề).
+- Không lấy HĐTN 3 của hai lớp này cho thời khóa biểu cá nhân GV Đậm.
+- Chỉ áp dụng ba quy tắc riêng cho GV Đậm; với giáo viên khác không cưỡng ép loại tiết như trên.
+- Những ô HĐTN khác của lớp 2C trong Excel không được tự gán loại tiết dựa trên thứ tự.
+
+3. CÁCH NÂNG CẤP AN TOÀN
+A. Sao lưu phiên bản website đang chạy và các cấu hình có liên quan.
+B. Giải nén ZIP. Thay 3 tệp index.html, app.js, styles.css vào đúng thư mục gốc
+   website; không xóa dữ liệu Supabase hoặc các thành phần khác của website.
+C. Nếu website tập trung trên máy chủ, thay trên máy chủ rồi nhấn Ctrl+F5 tại các máy.
+   Nếu mỗi máy sử dụng bản sao riêng, cập nhật mã nguồn ở mỗi máy.
+D. Đăng nhập đúng tài khoản giáo viên; chọn/cập nhật TKB tháng 11.2026 tại thời điểm
+   bắt đầu hiệu lực do nhà trường xác nhận (sheet TT còn ghi tháng 10.2026).
+E. Vào "TẢI PHỤ LỤC 2", chọn file Word mới kèm trong ZIP:
+   PHU_LUC_2_NGUON_KHOI_2_3_4_5.docx
+   Kết quả kỳ vọng: 455 dòng kế hoạch; nếu đã đăng nhập, app lưu phiên bản
+   mới vào Kho Phụ lục 2 trên Supabase.
+F. Chọn giáo viên "Đậm", chọn tuần muốn xem, kiểm tra 3 tiết HĐTN trong mục 2.
+G. Trên máy khác, đăng nhập cùng tài khoản, khôi phục Phụ lục 2 từ Supabase;
+   nếu cần, tải lại trang. Chọn tuần đã lưu (chức năng đồng bộ tuần có sẵn).
+
+4. VÍ DỤ TUẦN 12 THEO ĐÚNG WORD NGƯỜI DÙNG GỬI
+- Thứ Hai, lớp 3B1: HĐTN 1, lớp 3: "Bài 12: Thầy cô trong mắt em- Món quà tặng thầy cô. Sinh hoạt dưới cờ: Chào mừng ngày nhà giáo Việt Nam".
+- Thứ Tư, lớp 3B1: HĐTN 2, lớp 3: "Hoạt động giáo dục theo chủ đề: Thầy cô trong mắt em".
+- Thứ Năm, lớp 2C: HĐTN 2, lớp 2: "Bài 12: Biết ơn thầy cô.".
+
+5. CẢNH BÁO DỮ LIỆU PHỤ LỤC 2 GỐC
+- Trong Word mới, nội dung 35 tuần HĐTN 1, HĐTN 2 và HĐTN 3 lớp 2
+  giống hệt nhau. App có cảnh báo; vẫn giữ đúng tên bài của riêng bảng
+  HĐTN 2, lớp 2 cho tiết của GV Đậm. Người dùng/nhà trường cần xác minh
+  rằng ba bảng giống nhau là kế hoạch chính thức, không phải lỗi sao chép.
+- Ở khối 3, HĐTN 1/2/3 tuần 22 vẫn còn tiêu đề chưa đầy đủ:
+  "Bài 22: Sinh hoạt dưới cờ:", "Hoạt động giáo dục theo chủ đề:",
+  "Sinh hoạt lớp: Sinh hoạt theo chủ đề:". App không tự điền nội dung này.
+- Bảng TT tháng 11/2026 vẫn có tiêu đề "TKB THÁNG 10.2026";
+  cần xác nhận tuần hiệu lực với nhà trường trước khi đưa vào hệ thống.
+- Bảng BB lớp 2C có 4 ô HĐTN toàn lớp; chỉ ô thứ Năm sáng tiết 1 ghi
+  "HĐTN (Đậm)". Ba ô kia không thuộc phân công xác nhận ở bản cập nhật này.
+
+6. KIỂM THỬ THỰC HIỆN TRONG MÔI TRƯỜNG HIỆN CÓ
+- Node.js kiểm tra cú pháp app.js: ĐẠT.
+- Phân tích Word thật bằng DOMParser trong Chromium (mô phỏng JSZip đọc XML):
+  13 phần, 455 dòng, đúng 35 tuần HĐTN2 lớp 2: ĐẠT.
+- Kiểm thử logic bằng Node.js: 35 tuần, 3 vị trí GV Đậm, dữ liệu tuần 12/22,
+  cảnh báo 3 mạch HĐTN lớp 2 trùng nội dung và loại trừ các ô chưa có căn cứ: ĐẠT.
+- Cơ chế Supabase hiện có được giữ nguyên; không cần chạy SQL mới chỉ vì cập nhật này.
+- Chưa kiểm thử được đăng nhập/đồng bộ với cơ sở dữ liệu Supabase thật.
+- Chưa kiểm thử được xuất Excel/PDF/Google Sheets trên máy Windows thực tế.
+- Không mở được website local trong Chromium vì chặn mạng nội bộ của môi trường.
+
+LƯU Ý: Không xóa Phụ lục 2 cũ hoặc dữ liệu đã có trên Supabase khi nâng cấp.

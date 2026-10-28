@@ -653,10 +653,9 @@ function teacherTeachingScope() {
 function appendixSubjectMatchesScope(subject, grade, scope) {
   const g = Number(grade);
   const aliases = subjectAliasKeys(subject);
-  return scope.some(
-    (item) =>
-      Number(item.grade) === g && [...aliases].some((k) => item.aliases.has(k)),
-  );
+  return scope.some((item) => Number(item.grade) === g &&
+    ((isHDTNSubject(subject) && isHDTNSubject(item.subject)) ||
+      [...aliases].some((k) => item.aliases.has(k))));
 }
 async function autoLoadAppendix2ForSelectedTeacher() {
   if (!supabaseClient || !currentAuthUser) {
@@ -689,8 +688,7 @@ async function autoLoadAppendix2ForSelectedTeacher() {
       for (const row of rows || []) {
         scope.forEach((item, i) => {
           if (Number(item.grade) !== Number(row.grade)) return;
-          const aliases = subjectAliasKeys(row.subject_name);
-          if ([...aliases].some((k) => item.aliases.has(k))) covered.add(i);
+          if (appendixSubjectMatchesScope(row.subject_name, row.grade, [item])) covered.add(i);
         });
       }
       const score = covered.size;
@@ -722,6 +720,8 @@ async function autoLoadAppendix2ForSelectedTeacher() {
 // BƯỚC 5.6.2B.2 - CHỈ ĐỌC THỬ kho PPCT chung tKB_curriculum.
 // Không ghi/xóa dữ liệu, không thay lessonPlanMap và không thay cơ chế Phụ lục 2 hiện tại.
 function curriculumBaseSubject(code) {
+  // Không cắt số 1/2/3 khỏi mã mạch Hoạt động trải nghiệm.
+  if (hdtntypeFromLabel(code)) return normalizeSubjectForPlan(code);
   return clean(code).replace(/\s+(?:\d+|[A-Z])$/iu, "").trim();
 }
 // BƯỚC 5.6.2B.3A - So khớp môn CHẶT cho kho PPCT chung.
@@ -744,8 +744,11 @@ function curriculumSubjectKey(value) {
     ltt: "ltt", lttv: "lttv",
     // Hoạt động trải nghiệm trong kho PPCT được tách thành 3 mạch:
     // HĐGDCĐ (Hoạt động giáo dục theo chủ đề), SHDC, SHL.
-    // TKB ghi chung HĐTN được hiểu là tiết HĐGDCĐ; các nhãn sinh hoạt được giữ riêng.
-    hdtn: "hdgdcd", hoatdongtrainghiem: "hdgdcd", hdgdcd: "hdgdcd",
+    // HĐTN chung KHÔNG đủ để đoán loại tiết; chỉ các tên cụ thể mới được ghép.
+    hdtn: "hdtn", hoatdongtrainghiem: "hdtn",
+    hdtn1: "shdc", hoatdongtrainghiem1: "shdc",
+    hdtn2: "hdgdcd", hoatdongtrainghiem2: "hdgdcd", hdgdcd: "hdgdcd",
+    hdtn3: "shl", hoatdongtrainghiem3: "shl",
     shdc: "shdc", sinhhoatduoico: "shdc",
     shl: "shl", shlop: "shl", sinhhoatlop: "shl",
   };
@@ -784,7 +787,7 @@ async function sharedCurriculumPreviewData() {
     if (e?.lop !== undefined) y.lop = e.lop;
     const grade = gradeFromClass(y.lop);
     const hit = rows.find(
-      (r) => Number(r.grade) === Number(grade) && curriculumSubjectMatches(y.monHoc, r.subject_code),
+      (r) => Number(r.grade) === Number(grade) && curriculumSubjectMatches(appendixSubjectForTimetableLesson(y), r.subject_code),
     );
     const curriculumPlan = hit
       ? {
@@ -2300,6 +2303,14 @@ function renderStats() {
     .map(([a, b]) => `<div class="card"><small>${a}</small><b>${b}</b></div>`)
     .join("");
 }
+function hdtntimetablePreviewHtml(x, compact = false) {
+  if (!isHDTNSubject(x.monHoc)) return "";
+  const cls = compact ? "matrix-hdtn-brief" : "hdtn-plan-brief";
+  if (x.plan && !x.planIssue)
+    return `<div class="${cls}"><b>${esc(x.plan.subject)}</b> · ${esc(x.plan.title)}</div>`;
+  const message = x.planIssue || "Chưa xác định được loại tiết hoặc bài HĐTN từ Phụ lục 2";
+  return `<div class="${cls} hdtn-need-review">⚠ ${esc(message)}</div>`;
+}
 function renderTable(data) {
   // Gộp Thứ và Buổi theo đúng nhóm đang hiển thị (kể cả sau khi lọc).
   let rows = "";
@@ -2324,7 +2335,7 @@ function renderTable(data) {
           rows += `<td class="day-cell" rowspan="${dayEnd - i}"><strong>THỨ ${esc(String(thu).toUpperCase())}</strong></td>`;
         if (k === j)
           rows += `<td class="session-cell" rowspan="${sessionEnd - j}"><strong>${esc(buoi.toUpperCase())}</strong></td>`;
-        rows += `<td class="tiet-cell">${esc(x.tiet)}</td><td>${esc(x.thoiGian)}</td><td class="class-cell"><b>${esc(x.lop)}</b></td><td>${esc(normalizeSubjectForPlan(x.monHoc))}</td><td class="homeroom-cell">${esc(x.gvcn || "")}</td><td class="point-cell">${pointBadge(x.diemTruong)}</td></tr>`;
+        rows += `<td class="tiet-cell">${esc(x.tiet)}</td><td>${esc(x.thoiGian)}</td><td class="class-cell"><b>${esc(x.lop)}</b></td><td>${esc(displayTeachingSubject(x))}${hdtntimetablePreviewHtml(x)}</td><td class="homeroom-cell">${esc(x.gvcn || "")}</td><td class="point-cell">${pointBadge(x.diemTruong)}</td></tr>`;
         firstDay = false;
       }
       j = sessionEnd;
@@ -2361,7 +2372,7 @@ function renderWeek(data) {
               const items = sd.filter(
                 (x) => x.thu === day && Number(x.tiet) === tiet,
               );
-              return `<td class="matrix-slot">${items.map((x) => `<div class="matrix-lesson clickable-lesson" data-lesson-index="${allLessons.indexOf(x)}" title="Bấm để xem nguồn Excel"><div class="matrix-class">${esc(x.lop)}</div><div class="matrix-subject">${esc(normalizeSubjectForPlan(x.monHoc))}</div><div class="matrix-point">${pointBadge(x.diemTruong, true)}</div><div class="matrix-time">${esc(x.thoiGian)}</div></div>`).join("")}</td>`;
+              return `<td class="matrix-slot">${items.map((x) => `<div class="matrix-lesson clickable-lesson" data-lesson-index="${allLessons.indexOf(x)}" title="Bấm để xem nguồn Excel"><div class="matrix-class">${esc(x.lop)}</div><div class="matrix-subject">${esc(displayTeachingSubject(x))}</div>${hdtntimetablePreviewHtml(x, true)}<div class="matrix-point">${pointBadge(x.diemTruong, true)}</div><div class="matrix-time">${esc(x.thoiGian)}</div></div>`).join("")}</td>`;
             })
             .join("");
           return `<tr><th class="matrix-period"><b>Tiết ${tiet}</b>${time ? `<small>${esc(time)}</small>` : ""}</th>${cells}</tr>`;
@@ -2385,7 +2396,7 @@ function showSourceDetail(x) {
   const adjusted = x.tietDaHieuChinh
     ? `<div class="source-alert"><b>⚠ Tiết đã được hiệu chỉnh</b><br>Tiết ghi trong nguồn: <b>${esc(sourceTiet)}</b> → Tiết ứng dụng xác định: <b>${esc(x.tiet)}</b><br><span>${esc(x.ghiChuTiet)}</span></div>`
     : "";
-  const html = `<div class="source-modal" id="sourceModal" role="dialog" aria-modal="true"><div class="source-dialog"><button type="button" class="source-close" aria-label="Đóng">×</button><div class="source-title"><div><small>ĐỐI CHIẾU NGUỒN EXCEL</small><h3>${esc(x.sheetNguon)}!${addr}</h3></div><span class="source-badge">Ô nguồn</span></div><div class="source-origin"><span>Sheet <b>${esc(x.sheetNguon)}</b></span><span>Dòng <b>${x.dongNguon}</b></span><span>Cột <b>${colLetter(x.cotNguon - 1)} (${x.cotNguon})</b></span></div><div class="source-cell"><small>NỘI DUNG Ô EXCEL GỐC</small><strong>${esc(x.oNguon)}</strong></div>${adjusted}<div class="source-grid"><div><small>Thứ</small><b>Thứ ${esc(x.thu)}</b></div><div><small>Buổi</small><b>${esc(x.buoi)}</b></div><div><small>Tiết</small><b>${esc(x.tiet)}</b></div><div><small>Thời gian</small><b>${esc(x.thoiGian)}</b></div><div><small>Lớp</small><b>${esc(x.lop)}</b></div><div><small>Môn học</small><b>${esc(x.monHoc)}</b></div><div class="source-wide"><small>Điểm trường</small><b>📍 ${esc(x.diemTruong)}</b></div></div>${x.plan ? `<div class="source-pl2"><b>📘 PHỤ LỤC 2 · TUẦN ${x.planWeek}</b><div class="plan-title">${esc(x.plan.title)}</div><div class="plan-meta">${esc(x.plan.subject)} · Lớp ${x.plan.grade}${x.plan.duration ? ` · ${esc(x.plan.duration)}` : ""}</div></div>` : `<div class="source-pl2"><b>📘 PHỤ LỤC 2</b><div class="plan-meta">Chưa tìm thấy nội dung phù hợp cho tuần ${x.planWeek || $("weekSelect").value}.</div></div>`}<div class="source-foot">Kết quả được phân tích trực tiếp từ file Excel đang tải.</div></div></div>`;
+  const html = `<div class="source-modal" id="sourceModal" role="dialog" aria-modal="true"><div class="source-dialog"><button type="button" class="source-close" aria-label="Đóng">×</button><div class="source-title"><div><small>ĐỐI CHIẾU NGUỒN EXCEL</small><h3>${esc(x.sheetNguon)}!${addr}</h3></div><span class="source-badge">Ô nguồn</span></div><div class="source-origin"><span>Sheet <b>${esc(x.sheetNguon)}</b></span><span>Dòng <b>${x.dongNguon}</b></span><span>Cột <b>${colLetter(x.cotNguon - 1)} (${x.cotNguon})</b></span></div><div class="source-cell"><small>NỘI DUNG Ô EXCEL GỐC</small><strong>${esc(x.oNguon)}</strong></div>${adjusted}<div class="source-grid"><div><small>Thứ</small><b>Thứ ${esc(x.thu)}</b></div><div><small>Buổi</small><b>${esc(x.buoi)}</b></div><div><small>Tiết</small><b>${esc(x.tiet)}</b></div><div><small>Thời gian</small><b>${esc(x.thoiGian)}</b></div><div><small>Lớp</small><b>${esc(x.lop)}</b></div><div><small>Môn học</small><b>${esc(x.monHoc)}</b></div><div class="source-wide"><small>Điểm trường</small><b>📍 ${esc(x.diemTruong)}</b></div></div>${x.plan ? `<div class="source-pl2"><b>📘 PHỤ LỤC 2 · TUẦN ${x.planWeek}</b><div class="plan-title">${esc(x.plan.title)}</div><div class="plan-meta">${esc(x.plan.subject)}${hdtntypeFromLabel(x.plan.subject) ? ` (${esc(["", "Sinh hoạt dưới cờ", "Giáo dục theo chủ đề", "Sinh hoạt lớp"][hdtntypeFromLabel(x.plan.subject)])})` : ""} · Lớp ${x.plan.grade}${x.plan.duration ? ` · ${esc(x.plan.duration)}` : ""}</div></div>` : `<div class="source-pl2"><b>📘 PHỤ LỤC 2</b><div class="plan-meta">${esc(x.planIssue || `Chưa tìm thấy nội dung phù hợp cho tuần ${x.planWeek || $("weekSelect").value}.`)}</div></div>`}<div class="source-foot">Kết quả được phân tích trực tiếp từ file Excel đang tải.</div></div></div>`;
   document.body.insertAdjacentHTML("beforeend", html);
   const m = document.getElementById("sourceModal");
   const close = () => {
@@ -2418,6 +2429,95 @@ function bindLessonClicks() {
   });
 }
 
+// HĐTN 1/2/3 là ba LOẠI TIẾT cho mỗi KHỐI (lớp 2 hoặc lớp 3),
+// KHÔNG phải tên của các khối lớp. Lấy bài theo (mạch, khối, tuần).
+const HDTN_TRACK_SUBJECTS = { 1: "HĐTN 1", 2: "HĐTN 2", 3: "HĐTN 3" };
+function hdtntypeFromLabel(value) {
+  const k = normKey(value).replace(/[^a-z0-9]+/g, "");
+  if (/^(?:hdtn|hoatdongtrainghiem)1$/.test(k) || k === "shdc" || k === "sinhhoatduoico") return 1;
+  if (/^(?:hdtn|hoatdongtrainghiem)2$/.test(k) || k === "hdgdcd" || k === "hoatdonggiaoductheochude") return 2;
+  if (/^(?:hdtn|hoatdongtrainghiem)3$/.test(k) || k === "shl" || k === "sinhhoatlop" || k === "shlop") return 3;
+  return null;
+}
+function isHDTNSubject(value) {
+  const k = normKey(value).replace(/[^a-z0-9]+/g, "");
+  return /^(?:hdtn[123]?|hoatdongtrainghiem[123]?|hdgdcd|hoatdonggiaoductheochude|shdc|sinhhoatduoico|shl|shlop|sinhhoatlop)$/.test(k);
+}
+function hdtntimetableKey(x) {
+  return [normKey(x.sheetNguon || x.diemTruong), normKey(x.lop)].join("|");
+}
+function hdtnSlotId(x) {
+  return [normKey(x.thu), normKey(x.buoi), Number(x.tiet)].join("|");
+}
+function hdtnDayIndex(thu) {
+  return { hai: 2, ba: 3, tu: 4, nam: 5, sau: 6, bay: 7, chunhat: 8 }[normKey(thu)] || 99;
+}
+function allTimetableRowsForHDTN() {
+  // Chỉ khi có lịch cả lớp mới được suy ra vị trí thứ nhất/hai/ba;
+  // không dùng riêng các tiết của giáo viên đang xem để suy đoán.
+  const byTeacher = meta?.lessonsByTeacher;
+  if (!byTeacher || !Object.keys(byTeacher).length) return [];
+  return Object.values(byTeacher).flatMap((rows) => Array.isArray(rows) ? rows : []);
+}
+// Phân công đã được giáo viên xác nhận cho TKB tháng 11/2026.
+// Không suy mạch HĐTN từ thứ tự các ô cả lớp 2C: bảng nguồn có bốn ô HĐTN,
+// nhưng thầy Đậm chỉ dạy ô thứ Năm sáng tiết 1 (HĐTN 2).
+const VERIFIED_DAM_HDTN_SLOTS = [
+  { sheet: "tt", lop: "3B1", thu: "hai", buoi: "sang", tiet: 1, track: 1 },
+  { sheet: "tt", lop: "3B1", thu: "tu", buoi: "sang", tiet: 3, track: 2 },
+  { sheet: "bb", lop: "2C", thu: "nam", buoi: "sang", tiet: 1, track: 2 },
+];
+function verifiedDamHDTNTrack(x) {
+  // Chỉ áp dụng cho đúng giáo viên; không ép loại tiết của các GV khác.
+  if (normalizeTeacherName(selectedTeacher) !== normalizeTeacherName(TEACHER)) return null;
+  const sheet = normKey(x?.sheetNguon || "");
+  const lop = normalizeClassName(x?.lop || "");
+  const thu = normKey(x?.thu || "");
+  const buoi = normKey(x?.buoi || "");
+  const tiet = Number(x?.tiet);
+  const rule = VERIFIED_DAM_HDTN_SLOTS.find(v =>
+    v.sheet === sheet && v.lop === lop && v.thu === thu &&
+    v.buoi === buoi && v.tiet === tiet);
+  // Trường hợp không có thông tin ô nguồn (bản TKB lưu cũ), vẫn phải đúng
+  // cả giáo viên + lớp + sheet + thứ + buổi + tiết; không tự suy các ô khác.
+  return rule ? rule.track : null;
+}
+function hdtnTrackForTimetableLesson(x) {
+  if (!isHDTNSubject(x?.monHoc)) return null;
+  const explicit = hdtntypeFromLabel(x.monHoc) || hdtntypeFromLabel(x.oNguon);
+  if (explicit) return explicit;
+  const confirmed = verifiedDamHDTNTrack(x);
+  if (confirmed) return confirmed;
+  // Ngoài các vị trí đã xác nhận, chỉ dùng quy tắc suy loại tiết lớp 3
+  // khi có đủ cả ba tiết HĐTN của chính lớp trong TKB nguồn.
+  if (gradeFromClass(x.lop) !== 3) return null;
+  const key = hdtntimetableKey(x), unique = new Map();
+  for (const item of allTimetableRowsForHDTN()) {
+    if (!isHDTNSubject(item.monHoc) || hdtntimetableKey(item) !== key) continue;
+    unique.set(hdtnSlotId(item), item);
+  }
+  const sessions = [...unique.values()].sort((a,b) =>
+    hdtnDayIndex(a.thu) - hdtnDayIndex(b.thu) ||
+    (normKey(a.buoi) === 'sang' ? 0 : 1) - (normKey(b.buoi) === 'sang' ? 0 : 1) ||
+    Number(a.tiet) - Number(b.tiet));
+  // Chỉ suy theo thứ tự khi có đúng ba tiết, đầu tuần chào cờ và cuối tuần sinh hoạt lớp.
+  if (sessions.length !== 3 || hdtnDayIndex(sessions[0].thu) !== 2 ||
+      hdtnDayIndex(sessions[2].thu) !== 6) return null;
+  const pos = sessions.findIndex((item) => hdtnSlotId(item) === hdtnSlotId(x));
+  return pos >= 0 ? pos + 1 : null;
+}
+function appendixSubjectForTimetableLesson(x) {
+  if (!isHDTNSubject(x?.monHoc)) return normalizeSubjectForPlan(x?.monHoc);
+  const track = hdtnTrackForTimetableLesson(x);
+  return track ? HDTN_TRACK_SUBJECTS[track] : normalizeSubjectForPlan(x.monHoc);
+}
+function displayTeachingSubject(x) {
+  // Hiển thị rõ mạch HĐTN 1/2/3 ở lịch cá nhân, bản in và bản xuất,
+  // nhưng không thay đổi tên môn HĐTN nguyên gốc trong file Excel.
+  if (isHDTNSubject(x?.monHoc))
+    return x?.planSubject || appendixSubjectForTimetableLesson(x);
+  return normalizeSubjectForPlan(x?.monHoc);
+}
 const planSubjectCatalog = new Map();
 function subjectAliasKeys(subject) {
   const raw = clean(subject),
@@ -2455,7 +2555,8 @@ function subjectAliasKeys(subject) {
   return out;
 }
 function registerPlanSubject(subject) {
-  const canonical = clean(subject)
+  const track = hdtntypeFromLabel(subject);
+  const canonical = track ? HDTN_TRACK_SUBJECTS[track] : clean(subject)
     .replace(/^môn\s+/iu, "")
     .trim();
   if (!canonical) return canonical;
@@ -2464,6 +2565,8 @@ function registerPlanSubject(subject) {
   return canonical;
 }
 function normalizeSubjectForPlan(s) {
+  const track = hdtntypeFromLabel(s);
+  if (track) return HDTN_TRACK_SUBJECTS[track];
   const raw = clean(s),
     base = normKey(raw),
     compact = base.replace(/[^a-z0-9]+/g, "");
@@ -2501,7 +2604,10 @@ function planKey(subject, grade, week) {
 }
 function parsePlanSection(text) {
   const x = clean(text);
-  // Nhận động mọi tiêu đề: "Môn <tên môn> – Lớp <khối>", không khóa danh sách môn.
+  // Nhận 6 đề mục HĐTN 1/2/3 – Lớp 2 hoặc Lớp 3 trong Word.
+  const activity = x.match(/(?:Hoạt\s*động\s*trải\s*nghiệm|HĐTN)\s*([123])\s*[–—-]\s*Lớp\s*(\d{1,2})(?:\b|$)/iu);
+  if (activity) return { subject: registerPlanSubject(`HĐTN ${activity[1]}`), grade: Number(activity[2]) };
+  // Nhận động mọi tiêu đề: "Môn <tên môn> – Lớp <khối>".
   const m = x.match(/(?:^|\b)Môn\s+(.+?)\s*[–—-]\s*Lớp\s*(\d{1,2})(?:\b|$)/iu);
   if (!m) return null;
   const subject = registerPlanSubject(m[1]);
@@ -2600,20 +2706,42 @@ async function readPlanExcel(file) {
     }
   }
 }
+function isIncompleteHDTNTitle(record) {
+  if (!record || !hdtntypeFromLabel(record.subject)) return false;
+  const title = normKey(record.title).replace(/\s+/g, " ").trim();
+  return /^(?:bai\s*\d+\s*:\s*)?(?:sinh hoat duoi co|hoat dong giao duc theo chu de|sinh hoat lop\s*:\s*sinh hoat theo chu de)\s*:\s*$/.test(title);
+}
+function appendix2IncompleteHDTNRows() {
+  return [...lessonPlanMap.values()].filter(isIncompleteHDTNTitle);
+}
+function appendix2Grade2SameContentWarning() {
+  // Dữ liệu Word lớp 2 người dùng cung cấp có ba bảng giống hệt nhau.
+  // Chỉ cảnh báo kiểm tra bản gốc, KHÔNG sửa/tự tạo nội dung hay đổi mạch.
+  const rows = [1,2,3].map(track => Array.from({length:35}, (_,n) =>
+    lessonPlanMap.get(planKey(HDTN_TRACK_SUBJECTS[track], 2, n+1))));
+  return rows.every(track => track.every(Boolean)) &&
+    rows[0].every((r,i) => rows[1][i].title === r.title && rows[2][i].title === r.title);
+}
 function applyLessonPlan() {
   const week = Number($("weekSelect").value || 1);
   let matched = 0,
     missing = [];
   for (const x of allLessons) {
     const grade = gradeFromClass(x.lop),
-      subject = normalizeSubjectForPlan(x.monHoc),
-      plan = lessonPlanMap.get(planKey(subject, grade, week));
+      subject = appendixSubjectForTimetableLesson(x),
+      candidate = lessonPlanMap.get(planKey(subject, grade, week)),
+      incomplete = isIncompleteHDTNTitle(candidate),
+      plan = incomplete ? null : candidate;
+    const unknownTrack = isHDTNSubject(x.monHoc) && !hdtnTrackForTimetableLesson(x);
+    x.planIssue = incomplete
+      ? "Phụ lục 2 chưa ghi nội dung chi tiết của tiết HĐTN này."
+      : unknownTrack ? "Chưa xác định được loại tiết HĐTN trong TKB." : "";
     x.planWeek = week;
     x.planSubject = subject;
     x.planGrade = grade;
     x.plan = plan || null;
     if (plan) matched++;
-    else missing.push(`${x.lop} · ${subject}`);
+    else missing.push(`${x.lop} · ${subject}${incomplete ? " (PL2 thiếu nội dung chi tiết)" : unknownTrack ? " (chưa rõ loại tiết HĐTN)" : " (chưa có bài tương ứng trong PL2)"}`);
   }
   if (!lessonPlanMap.size) {
     $("pl2Match").className = "info pl2-match";
@@ -2624,7 +2752,7 @@ function applyLessonPlan() {
   $("pl2Match").className =
     `info pl2-match ${matched === allLessons.length ? "ok-match" : "warn-match"}`;
   $("pl2Match").innerHTML =
-    `<b>Tuần ${week}: ghép được ${matched}/${allLessons.length} tiết TKB</b>${unique.length ? `<div class="pl2-details">Chưa ghép: ${unique.map((x) => `<span class="pl2-chip">${esc(x)}</span>`).join("")}</div>` : `<div class="pl2-details">✓ Tất cả tiết đã tìm được tên bài học trong Phụ lục 2 theo Môn + Khối + Tuần.</div>`}`;
+    `<b>Tuần ${week}: ghép được ${matched}/${allLessons.length} tiết TKB</b>${appendix2IncompleteHDTNRows().length ? `<div class="pl2-details">⚠ Phụ lục 2 có ${appendix2IncompleteHDTNRows().length} mục HĐTN thiếu nội dung chi tiết (không tự điền tên bài).</div>` : ""}${appendix2Grade2SameContentWarning() ? `<div class="pl2-details">⚠ HĐTN 1/2/3 lớp 2 có cùng 35 tên bài trong Word. Ứng dụng giữ nguyên nguồn và chỉ lấy bảng HĐTN 2 cho lớp 2C của GV Đậm. Cần đối chiếu Phụ lục 2 chính thức.</div>` : ""}${unique.length ? `<div class="pl2-details">Chưa ghép: ${unique.map((x) => `<span class="pl2-chip">${esc(x)}</span>`).join("")}</div>` : `<div class="pl2-details">✓ Tất cả tiết đã tìm được tên bài học trong Phụ lục 2 theo Môn + Khối + Tuần.</div>`}`;
 }
 async function readLessonPlan(file) {
   try {
@@ -2634,7 +2762,7 @@ async function readLessonPlan(file) {
     else throw new Error("Chỉ hỗ trợ .docx, .xlsx, .xls");
     lessonPlanMeta = { file: file.name, type: ext, count: lessonPlanMap.size };
     $("pl2Info").innerHTML =
-      `<b>${esc(file.name)}</b> · ${lessonPlanMap.size} dòng kế hoạch đã nhận diện`;
+      `<b>${esc(file.name)}</b> · ${lessonPlanMap.size} dòng kế hoạch đã nhận diện${appendix2IncompleteHDTNRows().length ? ` · ⚠ ${appendix2IncompleteHDTNRows().length} nội dung HĐTN cần bổ sung` : ""}${appendix2Grade2SameContentWarning() ? " · ⚠ 3 mạch HĐTN lớp 2 trùng nội dung" : ""}`;
     applyLessonPlan();
     render();
     if (!currentAuthUser) {
@@ -2646,7 +2774,7 @@ async function readLessonPlan(file) {
     try {
       const saved = await saveAppendix2ToSupabase(file);
       $("pl2Info").innerHTML =
-        `<b>${esc(file.name)}</b> · ${lessonPlanMap.size} dòng kế hoạch đã nhận diện · ☁️ Đã lưu Supabase`;
+        `<b>${esc(file.name)}</b> · ${lessonPlanMap.size} dòng kế hoạch đã nhận diện · ☁️ Đã lưu Supabase${appendix2IncompleteHDTNRows().length ? ` · ⚠ ${appendix2IncompleteHDTNRows().length} nội dung HĐTN cần bổ sung` : ""}`;
       alert(
         `Đã lưu Phụ lục 2 lên Supabase: ${saved.subjects} môn, ${saved.lessons} dòng kế hoạch.`,
       );
@@ -3121,7 +3249,7 @@ function outputEditRowsHtml() {
         e = edits[id] || {},
         deleted = !!e.deleted;
       const mon =
-          e.monHoc !== undefined ? e.monHoc : normalizeSubjectForPlan(x.monHoc),
+          e.monHoc !== undefined ? e.monHoc : displayTeachingSubject(x),
         lop = e.lop !== undefined ? e.lop : clean(x.lop);
       const title =
         e.title !== undefined
@@ -3600,7 +3728,7 @@ function excelLessonCellFormal(data, day, session, tiet) {
   );
   return items
     .map((x) => {
-      const sub = normalizeSubjectForPlan(x.monHoc);
+      const sub = displayTeachingSubject(x);
       const planTiet = x.plan?.annualPeriod || x.plan?.week || x.planWeek || "";
       const lesson = x.plan?.title
         ? `Tiết ${planTiet} - ${x.plan.title}`
@@ -3620,7 +3748,7 @@ function excelLessonCell(data, day, session, tiet) {
   return items
     .map(
       (x) =>
-        `${x.monHoc} ${x.lop}\n${clean(x.diemTruong).replace(/^Điểm\s+/i, "Điểm ")}\n${x.thoiGian}`,
+        `${displayTeachingSubject(x)} ${x.lop}\n${clean(x.diemTruong).replace(/^Điểm\s+/i, "Điểm ")}\n${x.thoiGian}`,
     )
     .join("\n────────\n");
 }
@@ -3654,7 +3782,7 @@ function formalLessonHtml(data, day, session, tiet) {
   );
   return items
     .map((x) => {
-      const sub = normalizeSubjectForPlan(x.monHoc),
+      const sub = displayTeachingSubject(x),
         title = x.plan?.title || "",
         planTiet = x.plan?.annualPeriod || x.plan?.week || x.planWeek || "";
       if (!x.plan && isOptionalPracticeSubject(x.monHoc))
@@ -3671,12 +3799,14 @@ function outputTeacherDisplayName() {
 function outputTeacherFileKey() {
   return normKey(outputTeacherDisplayName()).replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "").toUpperCase() || "GIAO_VIEN";
 }
+// HĐTN chung phải hiện trên TKB ngay cả khi Phụ lục 2 chưa ghép bài.
+// Phụ lục 2 được kiểm tra riêng và hiển thị cảnh báo nếu còn thiếu tên bài.
 function isValidOutputSubject(subject) {
   const key = curriculumSubjectKey(normalizeSubjectForPlan(subject));
   return new Set([
     "tinhoc", "congnghe", "daoduc", "tiengviet", "toan",
     "khoahoc", "tnxh", "lsdl", "mythuat", "amnhac", "gdtc",
-    "tienganh", "ltt", "lttv", "hdgdcd", "shdc", "shl"
+    "tienganh", "ltt", "lttv", "hdtn", "hdgdcd", "shdc", "shl"
   ]).has(key);
 }
 function buildFormalOutput(data) {
@@ -7919,7 +8049,7 @@ function multiGsWeekDates569D4(week) {
 function multiGsLessonText569D4(data, day, session, tiet) {
   return data.filter(x => x.thu===day && normKey(x.buoi)===normKey(session) && Number(x.tiet)===Number(tiet))
     .map(x => {
-      const sub=normalizeSubjectForPlan(x.monHoc), title=clean(x.plan?.title), pt=x.plan?.annualPeriod || x.plan?.week || x.planWeek || "";
+      const sub=displayTeachingSubject(x), title=clean(x.plan?.title), pt=x.plan?.annualPeriod || x.plan?.week || x.planWeek || "";
       return `${sub} ${clean(x.lop)}${x.plan ? ` Tiết ${pt} - ` : " - "}${title}`.trim();
     }).join("\n");
 }

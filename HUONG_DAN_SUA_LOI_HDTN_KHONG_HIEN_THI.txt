@@ -1,0 +1,27 @@
+SỬA LỖI HĐTN KHÔNG HIỂN THỊ TRÊN TKB - 29/10/2026
+
+NGUYÊN NHÂN
+- Bản trước có 22 tiết TKB trong dữ liệu nhưng hàm isValidOutputSubject không chấp nhận mã "hdtn". Vì thế chỉ 19 tiết xuất hiện trong bảng và thống kê.
+- Dòng "Chưa ghép 3B1 HĐTN 1, 3B1 HĐTN 2, 2C HĐTN 2" là vấn đề KHÁC: dữ liệu Phụ lục 2 đang tải trên app chưa có đủ các mạch tương ứng.
+
+ĐÃ SỬA
+- Cho phép môn HĐTN chung xuất hiện ở dạng bảng, lịch tuần, thống kê, xem trước và đầu ra ngay cả khi chưa ghép được bài.
+- Giữ cảnh báo thiếu bài; không tự gán bài của lớp khác, mạch khác.
+- Giữ phân công đã xác nhận:
+  Thứ Hai, sáng 1, 3B1 -> HĐTN 1 lớp 3;
+  Thứ Tư, sáng 3, 3B1 -> HĐTN 2 lớp 3;
+  Thứ Năm, sáng 1, 2C -> HĐTN 2 lớp 2.
+- Không sửa dữ liệu TKB, Supabase, hoặc quy tắc đồng bộ tuần.
+
+CÁCH CẬP NHẬT
+1. Sao lưu thư mục cũ trong VS Code.
+2. Sao chép ghi đè app.js, index.html, styles.css vào thư mục mã nguồn hiện tại (giữ nguyên file/thư mục khác).
+3. Mở lại app bằng trình duyệt và nhấn Ctrl+F5 để làm mới.
+4. Chọn GV Đậm, Tuần 9, tất cả bộ lọc; TỔNG TIẾT dự kiến sẽ hiện 22 thay vì 19 nếu dữ liệu TKB nguồn không đổi.
+5. Phải thấy 3 tiết HĐTN trong bảng kể cả khi chưa ghép được nội dung PL2.
+6. Nếu còn "Chưa ghép" 3 tiết, vào "TẢI PHỤ LỤC 2", chọn PHU_LUC_2_NGUON_KHOI_2_3_4_5.docx trong gói; kiểm tra dòng trạng thái đã đọc 455 dòng. Nếu đăng nhập thì xác nhận lưu lên Supabase; kiểm tra lại Tuần 9.
+7. Có thể thay bằng bản PL2 chính thức mới hơn nếu nội dung nguồn thay đổi.
+
+GIỚI HẠN KIỂM THỬ
+- Kiểm tra cú pháp JS và phép thử điều kiện lọc với nhiều tên môn.
+- Chưa truy cập được Supabase thật, triển khai website thật hoặc dữ liệu đa máy.
