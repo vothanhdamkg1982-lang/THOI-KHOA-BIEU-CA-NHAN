@@ -12,6 +12,169 @@ let currentAuthUser = null;
 const TKB_SCHOOL_YEAR = "2026-2027";
 let currentSchoolYearId = null;
 
+// Đồng bộ TUẦN LÀM VIỆC trên mọi thiết bị dùng cùng tài khoản Supabase.
+// Bảng tkb_user_week_state được tạo bằng SQL kèm gói mã nguồn.
+const TKB_WEEK_SYNC_INTERVAL_MS = 15000;
+const weekSyncState = {
+  userId: null,
+  pendingWeek: null,
+  sending: false,
+  polling: false,
+  timer: null,
+  generation: 0,
+  lastError: "",
+};
+function normalizedWorkingWeek(value) {
+  const n = Number(value);
+  return Number.isInteger(n) && n >= 1 && n <= 35 ? n : 1;
+}
+function weekSyncPendingKey(userId = currentAuthUser?.id) {
+  return userId ? `tkb_week_pending_${TKB_SCHOOL_YEAR}_${userId}` : null;
+}
+function setWeekSyncStatus(text, kind = "info") {
+  const el = document.getElementById("weekSyncStatus");
+  if (!el) return;
+  el.textContent = text;
+  el.dataset.state = kind;
+}
+function stopWeekSync() {
+  if (weekSyncState.timer) clearInterval(weekSyncState.timer);
+  weekSyncState.timer = null;
+  weekSyncState.userId = null;
+  weekSyncState.pendingWeek = null;
+  weekSyncState.sending = false;
+  weekSyncState.polling = false;
+  weekSyncState.generation++;
+  weekSyncState.lastError = "";
+  setWeekSyncStatus("Đăng nhập để đồng bộ tuần giữa các máy.");
+}
+function activateSyncedWeek(week) {
+  const select = document.getElementById("weekSelect");
+  if (!select) return;
+  week = normalizedWorkingWeek(week);
+  if (Number(select.value) === week) return;
+  select.value = String(week);
+  saveOutputSettings(); // Cache theo tài khoản; KHÔNG ghi lại lên đám mây.
+  activateSelectedWeek();
+}
+function markWorkingWeekChanged() {
+  const userId = currentAuthUser?.id;
+  if (!userId) {
+    setWeekSyncStatus("Chưa đăng nhập: tuần chỉ dùng trong phiên này. Đăng nhập để lưu và đồng bộ.", "warning");
+    return;
+  }
+  const week = normalizedWorkingWeek(document.getElementById("weekSelect")?.value);
+  weekSyncState.pendingWeek = week;
+  weekSyncState.generation++;
+  const key = weekSyncPendingKey(userId);
+  try { localStorage.setItem(key, String(week)); }
+  catch (err) { console.warn("[TKB] Không lưu được tuần chờ đồng bộ", err); }
+  setWeekSyncStatus(`Tuần ${week} · Đang lưu lên đám mây...`, "pending");
+  void flushWorkingWeek();
+}
+async function flushWorkingWeek() {
+  const userId = currentAuthUser?.id;
+  if (!supabaseClient || !userId || weekSyncState.sending || weekSyncState.pendingWeek === null) return;
+  weekSyncState.sending = true;
+  try {
+    while (currentAuthUser?.id === userId && weekSyncState.pendingWeek !== null) {
+      const week = weekSyncState.pendingWeek;
+      // Không dùng giờ máy khách: trigger SQL cập nhật updated_at bằng đồng hồ máy chủ.
+      const { error } = await supabaseClient.from("tkb_user_week_state").upsert({
+        user_id: userId,
+        school_year: TKB_SCHOOL_YEAR,
+        week_number: week,
+      }, { onConflict: "user_id,school_year" });
+      if (error) throw error;
+      if (currentAuthUser?.id !== userId) break;
+      // Nếu người dùng đã đổi thêm lần nữa trong khi ghi, tiếp tục ghi giá trị mới nhất.
+      if (weekSyncState.pendingWeek === week) {
+        weekSyncState.pendingWeek = null;
+        try { localStorage.removeItem(weekSyncPendingKey(userId)); }
+        catch (err) { console.warn("[TKB] Không xóa được hàng chờ cục bộ", err); }
+        setWeekSyncStatus(`☁️ Tuần ${week} · Đã lưu, đồng bộ các máy`, "success");
+      }
+      weekSyncState.lastError = "";
+    }
+  } catch (err) {
+    if (currentAuthUser?.id === userId) {
+      weekSyncState.lastError = err?.message || String(err);
+      setWeekSyncStatus("⚠️ Chưa đồng bộ: " + weekSyncState.lastError + " · Sẽ thử lại khi có mạng.", "error");
+      console.warn("[TKB] Không ghi được tuần làm việc lên Supabase", err);
+    }
+  } finally {
+    weekSyncState.sending = false;
+  }
+}
+async function pullWorkingWeek({ initializeIfMissing = false } = {}) {
+  const userId = currentAuthUser?.id;
+  if (!supabaseClient || !userId || weekSyncState.polling || weekSyncState.sending) return;
+  if (weekSyncState.pendingWeek !== null) {
+    await flushWorkingWeek();
+    if (weekSyncState.pendingWeek !== null) return; // Không ghi đè tuần vừa chọn khi đang offline.
+  }
+  weekSyncState.polling = true;
+  const initialGeneration = weekSyncState.generation;
+  try {
+    const { data, error } = await supabaseClient.from("tkb_user_week_state")
+      .select("week_number,updated_at")
+      .eq("user_id", userId)
+      .eq("school_year", TKB_SCHOOL_YEAR)
+      .maybeSingle();
+    if (error) throw error;
+    if (currentAuthUser?.id !== userId || weekSyncState.generation !== initialGeneration || weekSyncState.pendingWeek !== null) return;
+    if (data) {
+      const week = normalizedWorkingWeek(data.week_number);
+      activateSyncedWeek(week);
+      setWeekSyncStatus(`☁️ Tuần ${week} · Đã đồng bộ (${TKB_SCHOOL_YEAR})`, "success");
+      weekSyncState.lastError = "";
+    } else if (initializeIfMissing) {
+      // Chuyển giá trị đang chọn từ bản cũ sang Supabase trong lần đăng nhập đầu tiên.
+      markWorkingWeekChanged();
+    } else {
+      setWeekSyncStatus("Chưa có tuần đã lưu trên đám mây. Hãy chọn tuần để đồng bộ.", "warning");
+    }
+  } catch (err) {
+    if (currentAuthUser?.id === userId) {
+      weekSyncState.lastError = err?.message || String(err);
+      setWeekSyncStatus("⚠️ Chưa đọc được tuần đồng bộ: " + weekSyncState.lastError, "error");
+      console.warn("[TKB] Không đọc được tuần làm việc từ Supabase", err);
+    }
+  } finally {
+    weekSyncState.polling = false;
+  }
+}
+async function startWorkingWeekSync() {
+  const userId = currentAuthUser?.id;
+  if (!userId || !supabaseClient) return;
+  if (weekSyncState.userId !== userId) {
+    stopWeekSync();
+    weekSyncState.userId = userId;
+  }
+  const key = weekSyncPendingKey(userId);
+  try {
+    const raw = localStorage.getItem(key);
+    if (raw && /^([1-9]|[12][0-9]|3[0-5])$/.test(raw))
+      weekSyncState.pendingWeek = Number(raw);
+  } catch (err) { console.warn("[TKB] Không đọc được hàng chờ tuần", err); }
+  if (weekSyncState.pendingWeek !== null) {
+    activateSyncedWeek(weekSyncState.pendingWeek);
+    await flushWorkingWeek();
+  }
+  await pullWorkingWeek({ initializeIfMissing: true });
+  if (!weekSyncState.timer && currentAuthUser?.id === userId) {
+    weekSyncState.timer = setInterval(() => {
+      if (document.visibilityState === "visible") void pullWorkingWeek();
+    }, TKB_WEEK_SYNC_INTERVAL_MS);
+  }
+}
+window.addEventListener("focus", () => { void pullWorkingWeek(); });
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible") void pullWorkingWeek();
+});
+window.addEventListener("online", () => { void pullWorkingWeek(); });
+
+
 async function ensureSupabaseSchoolYear() {
   if (!supabaseClient || !currentAuthUser)
     throw new Error("Bạn chưa đăng nhập giáo viên.");
@@ -573,9 +736,6 @@ function curriculumSubjectKey(value) {
     tv: "tiengviet", tviet: "tiengviet", tiengviet: "tiengviet",
     tnxh: "tnxh", tnvxh: "tnxh", tunhienxahoi: "tnxh", tunhienvaxahoi: "tnxh",
     lsdl: "lsdl", lsvdl: "lsdl", lichsudialy: "lsdl", lichsuvadialy: "lsdl",
-    // TKB thực tế ghi tách nhiều biến thể của cùng môn LS&ĐL.
-    // Chuẩn hóa về một khóa để không làm mất tiết của GV dạy Lịch sử/Địa lý.
-    lichsu: "lsdl", lsu: "lsdl", dialy: "lsdl", sudia: "lsdl",
     mt: "mythuat", mythuat: "mythuat", mithuat: "mythuat",
     an: "amnhac", amnhac: "amnhac",
     td: "gdtc", gdtc: "gdtc", theduc: "gdtc", giaoducthechat: "gdtc",
@@ -598,167 +758,63 @@ function curriculumSubjectMatches(subject, subjectCode) {
 }
 // BƯỚC 5.6.2B.4 - Kho PPCT chung chỉ cấp tên bài cho cửa sổ Xem trước.
 // Không ghi đè lessonPlanMap/Phụ lục 2 và chưa thay dữ liệu của Excel/PDF/In/Google Sheet.
-// BƯỚC 5.6.2B.9F.1 - Ghép PPCT theo ĐÚNG THỨ TỰ TIẾT TRONG TUẦN + số tiết lũy kế 35 tuần.
-// Quy tắc mã môn trong kho:
-//   Toán 1..5  => tiết thứ 1..5 của Toán trong tuần.
-//   Khoa học 1..2 => tiết thứ 1..2 của Khoa học trong tuần.
-//   Tiếng Việt 1..9, 0, A, B => tiết thứ 1..12 của Tiếng Việt trong tuần
-//     (0 = tiết thứ 10, A = 11, B = 12).
-// Mỗi LỚP được ghép độc lập. Không dùng rows.find() để lấy dòng đầu tiên rồi lặp cho cả tuần.
-// Số "Tiết N" hiển thị trước tên bài là số thứ tự LŨY KẾ của chính môn đó trong 35 tuần.
-function curriculumSlotOrder(subjectCode) {
-  const m = clean(subjectCode).match(/\s+([0-9]+|[A-Z])$/iu);
-  if (!m) return 999;
-  const token = String(m[1] || '').toUpperCase();
-  if (token === '0') return 10; // quy ước Tiếng Việt: 0 = tiết thứ 10 trong tuần
-  if (/^[1-9][0-9]*$/.test(token)) return Number(token);
-  if (/^[A-Z]$/.test(token)) return 11 + (token.charCodeAt(0) - 'A'.charCodeAt(0));
-  return 999;
-}
-function curriculumGroupKey(subject, grade) {
-  return `${Number(grade) || 0}|${curriculumSubjectKey(subject)}`;
-}
-function curriculumRowGroupKey(row) {
-  return curriculumGroupKey(curriculumBaseSubject(row?.subject_code), row?.grade);
-}
-function curriculumClassKey(lop) {
-  return normKey(clean(lop)).replace(/[^a-z0-9]+/g, '');
-}
-function sortCurriculumRows(rows) {
-  return [...(rows || [])].sort((a, b) =>
-    Number(a.week || 0) - Number(b.week || 0) ||
-    curriculumSlotOrder(a.subject_code) - curriculumSlotOrder(b.subject_code) ||
-    Number(a.ppct || 0) - Number(b.ppct || 0) ||
-    clean(a.subject_code).localeCompare(clean(b.subject_code), 'vi')
-  );
-}
-async function fetchSharedCurriculumRowsUpToWeek(week, grades) {
-  if (!supabaseClient) throw new Error('Supabase chưa sẵn sàng.');
-  const out = [];
-  const pageSize = 1000;
-  for (let from = 0; ; from += pageSize) {
-    let q = supabaseClient
-      .from('tkb_curriculum')
-      .select('week,ppct,subject_code,grade,lesson_name,stem')
-      .lte('week', Number(week))
-      .order('grade', { ascending: true })
-      .order('week', { ascending: true })
-      .order('subject_code', { ascending: true })
-      .range(from, from + pageSize - 1);
-    if (grades?.length) q = q.in('grade', grades);
-    const { data, error } = await q;
-    if (error) throw error;
-    const batch = data || [];
-    out.push(...batch);
-    if (batch.length < pageSize) break;
-    if (from > 10000) throw new Error('Kho PPCT có quá nhiều dòng, không thể đọc an toàn.');
-  }
-  return out;
-}
-function annotateCurriculumAnnualPeriods(rows) {
-  const groups = new Map();
-  for (const r of rows || []) {
-    const key = curriculumRowGroupKey(r);
-    if (!groups.has(key)) groups.set(key, []);
-    groups.get(key).push(r);
-  }
-  for (const list of groups.values()) {
-    sortCurriculumRows(list).forEach((r, i) => { r.__annualPeriod = i + 1; });
-  }
-  return rows;
-}
 async function sharedCurriculumPreviewData() {
-  const week = Number($('weekSelect')?.value || 1);
-  const visibleSource = filterSchedule();
-  if (!visibleSource.length) return [];
-
-  // Ghép thứ tự dựa trên TOÀN BỘ TKB tuần của GV đang xem, không dựa vào bộ lọc màn hình.
-  // Nhờ vậy nếu người dùng lọc Thứ/Buổi/Lớp thì số thứ tự bài vẫn không bị xê dịch.
-  const fullSource = sortSchedule(
-    (allLessons || [])
-      .filter((x) => isValidOutputSubject(x?.monHoc))
-      .filter((x) => isOfficialOutputPeriod(x)),
-  );
+  const week = Number($("weekSelect")?.value || 1);
+  const source = filterSchedule();
+  if (!source.length) return [];
+  if (!supabaseClient) throw new Error("Supabase chưa sẵn sàng.");
+  const grades = [...new Set(source.map((x) => gradeFromClass(x.lop)).filter(Boolean))];
+  let q = supabaseClient
+    .from("tkb_curriculum")
+    .select("week,ppct,subject_code,grade,lesson_name,stem")
+    .eq("week", week)
+    .order("grade", { ascending: true })
+    .order("subject_code", { ascending: true })
+    .order("ppct", { ascending: true });
+  if (grades.length) q = q.in("grade", grades);
+  const { data, error } = await q;
+  if (error) throw error;
+  const rows = data || [];
   const edits = loadOutputEdits();
-  const visibleIds = new Set(visibleSource.map((x) => outputLessonId(x)));
-  const prepared = [];
-  for (const x of fullSource) {
-    const sourceId = outputLessonId(x);
-    const e = edits[sourceId] || {};
-    const y = { ...x, __sourceOutputId: sourceId, __outputDeleted: !!e.deleted };
+  return source.map((x) => {
+    const e = edits[outputLessonId(x)];
+    if (e?.deleted) return null;
+    const y = { ...x };
     if (e?.monHoc !== undefined) y.monHoc = e.monHoc;
     if (e?.lop !== undefined) y.lop = e.lop;
-    prepared.push(y);
-  }
-
-  const grades = [...new Set(prepared.map((x) => gradeFromClass(x.lop)).filter(Boolean))];
-  const rows = annotateCurriculumAnnualPeriods(await fetchSharedCurriculumRowsUpToWeek(week, grades));
-
-  // Lấy các dòng của đúng tuần và xếp theo hậu tố mã môn (1,2,...9,0,A,B).
-  const weekRowsByGroup = new Map();
-  for (const r of rows) {
-    if (Number(r.week) !== week) continue;
-    const key = curriculumRowGroupKey(r);
-    if (!weekRowsByGroup.has(key)) weekRowsByGroup.set(key, []);
-    weekRowsByGroup.get(key).push(r);
-  }
-  for (const [key, list] of weekRowsByGroup) weekRowsByGroup.set(key, sortCurriculumRows(list));
-
-  // Đếm thứ tự tiết theo Môn + Khối + LỚP. Mỗi lớp bắt đầu lại từ tiết thứ 1 của tuần.
-  const occurrenceByClassSubject = new Map();
-  const mapped = prepared.map((y) => {
     const grade = gradeFromClass(y.lop);
-    const subjectKey = curriculumSubjectKey(y.monHoc);
-    const rowGroup = curriculumGroupKey(y.monHoc, grade);
-    const occurrenceKey = `${rowGroup}|${curriculumClassKey(y.lop)}`;
-    const occurrence = occurrenceByClassSubject.get(occurrenceKey) || 0;
-    occurrenceByClassSubject.set(occurrenceKey, occurrence + 1);
-
-    const slots = weekRowsByGroup.get(rowGroup) || [];
-    const hit = slots[occurrence] || null;
+    const hit = rows.find(
+      (r) => Number(r.grade) === Number(grade) && curriculumSubjectMatches(y.monHoc, r.subject_code),
+    );
     const curriculumPlan = hit
       ? {
           subject: curriculumBaseSubject(hit.subject_code),
           grade,
           week,
-          // Không dùng PPCT=Tuần làm số tiết nữa. Đây là số tiết lũy kế thật của môn trong 35 tuần.
-          annualPeriod: Number(hit.__annualPeriod) || '',
+          annualPeriod: hit.ppct ?? "",
           title: clean(hit.lesson_name),
-          duration: '',
+          duration: "",
           integration: clean(hit.stem),
-          note: '',
-          source: 'Kho PPCT chung',
-          subjectCode: clean(hit.subject_code),
-          weeklySlot: curriculumSlotOrder(hit.subject_code),
+          note: "",
+          source: "Kho PPCT chung",
         }
       : null;
-
-    const e = edits[y.__sourceOutputId] || {};
-    // Điều chỉnh thủ công trong Xem trước vẫn ưu tiên cao nhất, nhưng giữ đúng số tiết lũy kế đã ghép.
+    // Điều chỉnh thủ công trong Xem trước vẫn có quyền ưu tiên cao nhất.
     if (e?.title !== undefined) {
       y.plan = {
         ...(curriculumPlan || {}),
         title: e.title,
-        annualPeriod: e.annualPeriod !== undefined ? e.annualPeriod : curriculumPlan?.annualPeriod || '',
+        annualPeriod: e.annualPeriod !== undefined ? e.annualPeriod : curriculumPlan?.annualPeriod || "",
         week,
         subject: normalizeSubjectForPlan(y.monHoc),
         grade,
       };
-    } else {
-      y.plan = curriculumPlan;
-    }
+    } else y.plan = curriculumPlan;
     y.planWeek = week;
     y.planSubject = normalizeSubjectForPlan(y.monHoc);
     y.planGrade = grade;
-    y.curriculumOccurrence = occurrence + 1;
-    y.curriculumExpectedCount = slots.length;
-    y.curriculumMatched = !!hit;
     return y;
-  });
-
-  // Chỉ trả các tiết đang thuộc phạm vi Xem trước, sau khi đã tính thứ tự trên toàn tuần.
-  // Tiết bị xóa thủ công không hiển thị nhưng KHÔNG làm các tiết sau bị dồn sai thứ tự PPCT.
-  return mapped.filter((y) => !y.__outputDeleted && visibleIds.has(y.__sourceOutputId));
+  }).filter(Boolean);
 }
 
 async function probeSharedCurriculum() {
@@ -1029,9 +1085,6 @@ async function restoreScheduleRepositoryFromSupabase() {
   // Supabase là nguồn lâu dài sau khi đăng nhập; localStorage được cập nhật lại làm bản dự phòng.
   scheduleVersions.splice(0, scheduleVersions.length, ...restored);
   loadHomeroomTeacherMap();
-  // Điện thoại/thiết bị mới chưa có localStorage GVCN: dựng lại bản đồ trực tiếp
-  // từ các dòng TKB đa giáo viên vừa tải từ Supabase, rồi áp vào toàn bộ phiên TKB.
-  mergeHomeroomTeachersFromSupabaseRows(rows || [], restoredTeachers);
   enrichAllScheduleVersionsWithHomeroom();
   scheduleVersions.sort(
     (a, b) =>
@@ -1075,6 +1128,7 @@ async function restoreAfterLogin(showMessage = false) {
     const appendix2Result = await restoreAppendix2FromSupabase();
     restoreOutputSettings();
     activateSelectedWeek();
+    await startWorkingWeekSync();
     if (showMessage) {
       const parts = [];
       if (calendarResult.weeks)
@@ -1099,10 +1153,20 @@ async function restoreAfterLogin(showMessage = false) {
         "⚠️ Supabase: Đã đăng nhập nhưng chưa tải được đầy đủ dữ liệu";
     if (showMessage)
       alert("Không tải được dữ liệu từ Supabase: " + (e.message || e));
+    // Đồng bộ lựa chọn tuần độc lập với Kho TKB/Phụ lục 2.
+    // Nếu một phân hệ tải lỗi, vẫn cố gắng lấy tuần đang chọn từ Supabase.
+    try {
+      restoreOutputSettings();
+      activateSelectedWeek();
+      await startWorkingWeekSync();
+    } catch (weekErr) {
+      console.warn("[TKB] Chưa thể khôi phục lựa chọn tuần", weekErr);
+    }
   }
 }
 
 function updateAuthUI(user) {
+  if (currentAuthUser?.id !== (user?.id || null)) stopWeekSync();
   if (
     currentAuthUser?.id !== (user?.id || null) &&
     typeof clearGoogleSheetsTeacherMapping === "function"
@@ -1988,19 +2052,15 @@ function inheritBuoi(value, state) {
   if (clean(value)) state.buoi = clean(value);
   return state.buoi;
 }
-function resolveTiet(row, index, rows, headerMap, state, hintedTiet = "") {
+function resolveTiet(row, index, rows, headerMap, state) {
   const raw = clean(row[headerMap.tiet]),
-    time = clean(row[headerMap.time]),
-    hint = /^\d+$/.test(clean(hintedTiet)) ? clean(hintedTiet) : "";
+    time = clean(row[headerMap.time]);
   state.lastResolveInfo = { rawTiet: raw || "", adjusted: false, note: "" };
   if (!time || /ra\s*chơi/i.test(time)) return "";
   const ctx = `${state.thu}|${normKey(state.buoi)}`;
   // Nếu cột Tiết trống: suy luận từ hàng tiết hợp lệ gần nhất phía trên trong cùng Thứ/Buổi.
   let inferred = "";
-  // Một số TKB tách "Sinh hoạt dưới cờ" 15 phút và HĐTN trong cùng Tiết 1.
-  // Ô HĐTN có thể để trống cột Tiết nhưng ghi rõ "HĐTN (Tiết 1)".
-  // Ưu tiên số Tiết ghi trong chính ô môn trước khi suy từ hàng phía trên.
-  if (!/^\d+$/.test(raw) && !hint) {
+  if (!/^\d+$/.test(raw)) {
     for (let r = index - 1; r >= 0; r--) {
       const rr = rows[r],
         t = clean(rr[headerMap.tiet]),
@@ -2016,7 +2076,7 @@ function resolveTiet(row, index, rows, headerMap, state, hintedTiet = "") {
       }
     }
   }
-  let resolved = /^\d+$/.test(raw) ? raw : (hint || inferred);
+  let resolved = /^\d+$/.test(raw) ? raw : inferred;
   // Kiểm tra mâu thuẫn tuần tự trên các tiết Đậm liên tiếp trong cùng buổi.
   // Trường hợp file ghi 1, [trống=>2], 2 nhưng thời gian tiếp tục sang tiết sau: cảnh báo và dùng 3.
   const prev = state.lastResolved;
@@ -2083,9 +2143,6 @@ function extractTeacherLessons(sheetName, ws, teacherName = selectedTeacher, kno
     errors = [];
   for (let r = hr + 1; r < rows.length; r++) {
     let row = rows[r];
-    // Dừng đúng cuối vùng TKB; không để các bảng "GVCN/Cộng" phía dưới
-    // bị hiểu nhầm thành tiết dạy của giáo viên chủ nhiệm.
-    if (normKey(row?.[0]) === "gvcn") break;
     let thu = inheritThu(row[hm.thu], state),
       buoi = inheritBuoi(row[hm.buoi], state),
       time = clean(row[hm.time]);
@@ -2122,25 +2179,12 @@ function extractTeacherLessons(sheetName, ws, teacherName = selectedTeacher, kno
       }
 
       if (!belongsToTeacher || breakRow) continue;
-      const mon = extractSubject(src, assignedTeachers);
-
-      // "Sinh hoạt dưới cờ" là dòng hoạt động ngắn đứng ngoài số tiết dạy
-      // chính khóa của bảng TKB (nguồn có dòng riêng trước HĐTN hoặc sau Tiết 7).
-      // Không đưa dòng này vào tổng số tiết dạy cá nhân.
-      if (curriculumSubjectKey(mon) === "shdc") continue;
-
-      // TKB BN có dạng: Tiết 1 = Sinh hoạt dưới cờ 15 phút, dòng kế tiếp
-      // HĐTN (Tiết 1) nhưng cột Tiết để trống. Nếu suy tuần tự sẽ đẩy
-      // HĐTN thành Tiết 2 và làm lệch toàn bộ buổi sáng của GVCN (ví dụ Vẽ).
-      const sourceKeyForPeriod = normKey(src);
-      const hintedPeriodMatch = sourceKeyForPeriod.match(/^hdtn\b.*?\(\s*tiet\s*(\d+)\s*\)/u);
-      const hintedPeriod = hintedPeriodMatch?.[1] || "";
-      let tiet = resolveTiet(row, r, rows, hm, state, hintedPeriod);
+      let tiet = resolveTiet(row, r, rows, hm, state),
+        mon = extractSubject(src, assignedTeachers);
       // BƯỚC 5.6.2B.9E.1: theo TKB 28.9 đã chỉnh sửa, lịch chính thức chỉ có Tiết 1–7.
       // resolveTiet trước đây có thể suy diễn một dòng trống Tiết thành Tiết 8 theo thứ tự thời gian.
       // Bỏ dòng suy diễn >7 ngay tại parser để lần lưu kế tiếp không ghi lại Tiết 8 giả lên Supabase.
-      const displayTiet = normKey(buoi) === "chieu" ? 4 + Number(tiet || 0) : Number(tiet || 0);
-      if (displayTiet < 1 || displayTiet > 7) continue;
+      if (Number(tiet) > 7) continue;
       let ri = state.lastResolveInfo || {};
       let item = {
         thu,
@@ -2196,10 +2240,7 @@ function sortSchedule(a) {
 }
 function filterSchedule() {
   return sortSchedule(
-    allLessons
-      .filter((x) => isValidOutputSubject(x?.monHoc))
-      .filter((x) => isOfficialOutputPeriod(x))
-      .filter(
+    allLessons.filter((x) => isValidOutputSubject(x?.monHoc)).filter(
       (x) =>
         (!$("fThu").value || x.thu === $("fThu").value) &&
         (!$("fBuoi").value || clean(x.buoi) === $("fBuoi").value) &&
@@ -2240,9 +2281,7 @@ function pointBadge(s, compact = false) {
 function renderStats() {
   // BƯỚC 5.6.2B.8A: giao diện chính dùng cùng bộ lọc môn hợp lệ
   // với Xem trước/Excel/PDF/In; không tính các ô rác của bảng Cộng.
-  const dashboardLessons = allLessons
-    .filter((x) => isValidOutputSubject(x?.monHoc))
-    .filter((x) => isOfficialOutputPeriod(x));
+  const dashboardLessons = allLessons.filter((x) => isValidOutputSubject(x?.monHoc));
   let p = (x) =>
     dashboardLessons.filter((y) => normKey(y.diemTruong).includes(x)).length;
   let vals = [
@@ -2450,16 +2489,6 @@ function normalizeSubjectForPlan(s) {
     shl: "SH LỚP",
     shlop: "SH LỚP",
     sinhhoatlop: "SH LỚP",
-    // Các cách ghi trong TKB: "Lịch Sử", "L Sử", "Địa lý", "Sử địa"
-    // đều là môn Lịch sử & Địa lý trong kho PPCT.
-    lsdl: "Lịch sử & Địa lý",
-    lsvdl: "Lịch sử & Địa lý",
-    lichsudialy: "Lịch sử & Địa lý",
-    lichsuvadialy: "Lịch sử & Địa lý",
-    lichsu: "Lịch sử & Địa lý",
-    lsu: "Lịch sử & Địa lý",
-    dialy: "Lịch sử & Địa lý",
-    sudia: "Lịch sử & Địa lý",
   };
   return builtins[compact] || raw;
 }
@@ -2698,34 +2727,6 @@ function mergeHomeroomTeachersFromLessons(lessons) {
     const gvcn = clean(x.gvcn);
     if (lop && gvcn && homeroomTeacherMap[lop] !== gvcn) {
       homeroomTeacherMap[lop] = gvcn;
-      changed = true;
-    }
-  }
-  if (changed) saveHomeroomTeacherMap();
-  return changed;
-}
-
-// BƯỚC 5.6.2B.9G.1A — khôi phục GVCN trên thiết bị mới/điện thoại.
-// Trước đây bản đồ Lớp -> GVCN chỉ nằm trong localStorage của máy đã tải Excel,
-// nên khi mở app trên điện thoại Supabase vẫn có TKB nhưng cột GVCN bị trống.
-// Các dòng Supabase đã có teacher_name + source_cell. Theo đúng quy tắc parser:
-// ô TKB KHÔNG ghi tên GV riêng thì người dạy chính là GVCN của lớp.
-function mergeHomeroomTeachersFromSupabaseRows(rows, knownTeachers = []) {
-  let changed = false;
-  for (const r of rows || []) {
-    const lop = normalizeClassName(r?.lop);
-    const teacherName = clean(r?.teacher_name);
-    const sourceCell = clean(r?.source_cell);
-    if (!lop || !teacherName || !sourceCell) continue;
-
-    // Có tên GV ghi riêng trong ô => đây là tiết GV bộ môn, không dùng để suy GVCN.
-    const explicitTeachers = teacherNamesFromCell(sourceCell, knownTeachers);
-    if (explicitTeachers.length) continue;
-
-    // Chỉ dùng các dòng đã thực sự được parser lưu thành tiết học.
-    // teacher_name của dòng không ghi GV riêng chính là GVCN theo quy tắc TKB toàn trường.
-    if (homeroomTeacherMap[lop] !== teacherName) {
-      homeroomTeacherMap[lop] = teacherName;
       changed = true;
     }
   }
@@ -3076,22 +3077,6 @@ function saveOutputEdits(edits) {
     console.warn("[TKB] Không lưu được điều chỉnh bản kế hoạch tuần", e);
   }
 }
-// BƯỚC 5.6.2B.9E.2: Chuẩn hóa một nguồn duy nhất cho số Tiết hiển thị.
-// Dữ liệu TKB lưu Tiết theo từng buổi: Sáng 1–4, Chiều 1–3.
-// Khi xuất Phụ lục 1.4: Chiều 1–3 phải hiển thị thành Tiết 5–7.
-// Mọi đầu ra dùng chung quy tắc này để không còn lệch Preview/Excel/Google Sheet.
-function outputDisplayPeriod(x) {
-  const t = Number(x?.tiet) || 0;
-  const session = normKey(x?.buoi);
-  if (session === "sang") return t;
-  if (session === "chieu") return t ? 4 + t : 0;
-  return t;
-}
-function isOfficialOutputPeriod(x) {
-  const p = outputDisplayPeriod(x);
-  return p >= 1 && p <= 7;
-}
-
 function outputScheduleData() {
   applyLessonPlan();
   const edits = loadOutputEdits();
@@ -3122,7 +3107,7 @@ function outputScheduleData() {
     // BƯỚC 5.6.2B.9E.1B: TKB chính thức mới chỉ có Tiết 1–7.
     // Lọc ngay tại nguồn dữ liệu đầu ra để Preview/Excel/PDF/In/Google Sheet
     // không thể tái hiện Tiết 8 còn sót trong cache/phiên cũ.
-    .filter((x) => x && isOfficialOutputPeriod(x));
+    .filter((x) => x && Number(x.tiet) >= 1 && Number(x.tiet) <= 7);
 }
 function outputEditRowsHtml() {
   applyLessonPlan();
@@ -3222,7 +3207,7 @@ function exportExcel() {
     rows.push([
       "Chiều",
       maxMorning + t,
-      ...days.map((day) => excelLessonCellFormal(d, day, "Chiều", t)),
+      ...days.map((day) => excelLessonCellFormal(d, day, "Chiều", maxMorning + t)),
       "",
     ]);
   const totalRow = rows.length + 1;
@@ -3601,13 +3586,17 @@ function isOptionalPracticeSubject(subject) {
   return k === "ltt" || k === "lttv";
 }
 function excelLessonCellFormal(data, day, session, tiet) {
-  // BƯỚC 5.6.2B.9E.2: tra tiết y hệt Preview.
-  // `tiet` ở đây là số tiết TRONG BUỔI: Sáng 1–4, Chiều 1–3.
+  // BƯỚC 5.6.2B.9E.1F: với khung Excel cố định 1–7, số tiết là nguồn xác định
+  // vị trí hàng. Không lọc lại theo nhãn buổi cũ vì một số bản ghi phục hồi có
+  // buổi không đồng nhất; điều đó từng làm Tiết 6–7 có trên Preview nhưng trống Excel.
+  // Khung đã cố định: 1–4 = Sáng, 5–7 = Chiều.
+  const period = Number(tiet);
+  const expectedSession = period <= 4 ? "Sáng" : "Chiều";
+  if (normKey(session) !== normKey(expectedSession)) return "";
   const items = data.filter(
     (x) =>
       x.thu === day &&
-      normKey(x.buoi) === normKey(session) &&
-      Number(x.tiet) === Number(tiet),
+      Number(x.tiet) === period,
   );
   return items
     .map((x) => {
@@ -3699,7 +3688,8 @@ function buildFormalOutput(data) {
   // Một số luồng xem trước đa tuần/khôi phục gọi buildFormalOutput trực tiếp,
   // nên bộ lọc ở outputScheduleData chưa đủ để loại Tiết 8 cũ.
   data = (data || []).filter((x) =>
-    isValidOutputSubject(x.monHoc) && isOfficialOutputPeriod(x)
+    isValidOutputSubject(x.monHoc) &&
+    Number(x.tiet) >= 1 && Number(x.tiet) <= 7
   );
   const wd = selectedWeekDates(),
     days = ["Hai", "Ba", "Tư", "Năm", "Sáu"],
@@ -4059,7 +4049,9 @@ $("pl2Input").addEventListener(
 $("weekSelect").addEventListener("change", () => {
   saveOutputSettings();
   activateSelectedWeek();
+  markWorkingWeekChanged();
 });
+$("weekSyncRefresh")?.addEventListener("click", () => { void pullWorkingWeek({ initializeIfMissing: true }); });
 $("calendarBtn") && ($("calendarBtn").onclick = openCalendarManager);
 $("repoBtn") && ($("repoBtn").onclick = openRepoManager);
 $("appendix2RepoBtn") &&
@@ -7936,7 +7928,7 @@ async function writeMultiTeacherGoogleSheet569D4(options={}) {
   if (!Number.isInteger(week)||week<1||week>35) throw new Error("Chỉ hỗ trợ Tuần 1–35.");
   const data=outputScheduleData().map(x=>({...x})).filter(x=>isValidOutputSubject(x.monHoc));
   if (!data.length) throw new Error(`Tuần ${week} không có tiết dạy để ghi.`);
-  const over7=data.filter(x=>!isOfficialOutputPeriod(x));
+  const over7=data.filter(x=>Number(x.tiet)>7);
   if (over7.length) throw new Error(`DỪNG GHI: còn ${over7.length} tiết lớn hơn Tiết 7 trong TKB nguồn. Hãy kiểm tra TKB trước khi ghi Google Sheet.`);
   const noTitle=data.filter(x=>!clean(x.plan?.title));
   if (noTitle.length) throw new Error(`DỪNG GHI: còn ${noTitle.length} tiết chưa ghép tên bài PPCT chung.`);
@@ -7962,8 +7954,7 @@ async function writeMultiTeacherGoogleSheet569D4(options={}) {
   const dayKeys=["Hai","Ba","Tư","Năm","Sáu"];
   for(let t=1;t<=7;t++){
     const r=4+t; rows[r][0]=t===1?"Sáng":t===5?"Chiều":""; rows[r][1]=t;
-    const session=t<=4?"Sáng":"Chiều", relativeTiet=t<=4?t:t-4;
-    dayKeys.forEach((d,i)=>rows[r][2+i]=multiGsLessonText569D4(data,d,session,relativeTiet));
+    dayKeys.forEach((d,i)=>rows[r][2+i]=multiGsLessonText569D4(data,d,t<=4?"Sáng":"Chiều",t));
   }
   rows[12][0]=`Tổng số: ${data.length} tiết`;
   rows[13][0]="TỔNG HỢP";
@@ -8020,502 +8011,4 @@ resetGoogleSheetWeekRange=async function(firstWeek,lastWeek){
   await gsJson(`${base}/values/${encodeURIComponent(q+`!A${r1.startRow}:H${r2.endRow}`)}:clear`,{method:"POST",headers,body:"{}"});
   alert(`LÀM MỚI THÀNH CÔNG\n\nTab: ${target.sheetName}\nVùng đã làm sạch: A${r1.startRow}:H${r2.endRow}.`);
   return true;
-};
-
-// BƯỚC 5.6.2B.9E.3 - Google Sheet đa GV dùng CHÍNH XÁC cùng nguồn dữ liệu với Preview/Excel đã Đạt.
-// Mục tiêu: giáo viên khác Đậm Ghi/Cập nhật và Làm mới đúng tab, đúng tuần, đúng Tiết 1–7.
-// Luồng Google Sheet công vụ của Đậm giữ nguyên hoàn toàn.
-async function multiGsPreviewData9E3(week) {
-  return await withOutputWeekAsync561B4B(week, async () => {
-    const data = validFormalOutputData561B7B(await sharedCurriculumPreviewData());
-    return data.filter((x) => isOfficialOutputPeriod(x));
-  });
-}
-function multiGsLessonText9E3(data, day, displayPeriod) {
-  return (Array.isArray(data) ? data : [])
-    .filter((x) => x.thu === day && outputDisplayPeriod(x) === Number(displayPeriod))
-    .map((x) => {
-      const sub = normalizeSubjectForPlan(x.monHoc),
-        title = clean(x.plan?.title),
-        pt = x.plan?.annualPeriod || x.plan?.week || x.planWeek || "";
-      const lesson = title ? ` Tiết ${pt} - ${title}` : "";
-      return `${sub} ${clean(x.lop)}${lesson}`.trim();
-    })
-    .join("\n");
-}
-function multiGsRows9E3(data, week) {
-  const rows = Array.from({ length: MULTI_GS_BLOCK_ROWS_569D4 }, () => Array(8).fill(""));
-  const wd = multiGsWeekDates569D4(week), dayKeys = ["Hai", "Ba", "Tư", "Năm", "Sáu"];
-  rows[0][0] = `PHỤ LỤC 1.4`;
-  rows[1][0] = `Hoạt động giáo dục tuần ${week}`;
-  rows[2][0] = `Năm học 2026 – 2027. ${formalSubjectGradeText(data)}, Trường TH – THCS & THPT Lại Sơn`;
-  rows[3] = ["Thời gian", "", `Ngày ${wd.days[0]}\nThứ hai`, `Ngày ${wd.days[1]}\nThứ ba`, `Ngày ${wd.days[2]}\nThứ tư`, `Ngày ${wd.days[3]}\nThứ năm`, `Ngày ${wd.days[4]}\nThứ sáu`, "Nội dung\nđiều chỉnh"];
-  rows[4] = ["Buổi", "Tiết", "", "", "", "", "", ""];
-  for (let p = 1; p <= 7; p++) {
-    const r = 4 + p;
-    rows[r][0] = p === 1 ? "Sáng" : p === 5 ? "Chiều" : "";
-    rows[r][1] = p;
-    dayKeys.forEach((day, i) => {
-      rows[r][2 + i] = multiGsLessonText9E3(data, day, p);
-    });
-  }
-  rows[12][0] = `Tổng số: ${data.length} tiết`;
-  rows[13][0] = "TỔNG HỢP";
-  rows[14] = ["TT", "Nội dung", "", "", "Số lượng tiết học", "", "Ghi chú", ""];
-  const subjects = [...new Set(data.map((x) => normalizeSubjectForPlan(x.monHoc)).filter(Boolean))];
-  const concurrent = getConcurrentPeriods();
-  if (subjects.length + (concurrent > 0 ? 1 : 0) > 16)
-    throw new Error("TỔNG HỢP có quá nhiều nội dung cho khối tuần Google Sheet.");
-  let r = 15;
-  subjects.forEach((sub, i) => {
-    rows[r][0] = i + 1;
-    rows[r][1] = sub;
-    rows[r][4] = data.filter((x) => normalizeSubjectForPlan(x.monHoc) === sub).length;
-    r++;
-  });
-  if (concurrent > 0) {
-    rows[r][0] = r - 14;
-    rows[r][1] = "Kiêm nhiệm";
-    rows[r][4] = concurrent;
-  }
-  rows[31][1] = "Tổng số";
-  rows[31][4] = data.length + concurrent;
-  rows[33][4] = formalSignatureDate(wd);
-  rows[34][0] = "P. HIỆU TRƯỞNG";
-  rows[34][2] = "TỔ TRƯỞNG";
-  rows[34][5] = "NGƯỜI LẬP KẾ HOẠCH";
-  rows[35][5] = outputTeacherDisplayName();
-  return { rows, wd, subjects, concurrent };
-}
-function multiGsFormatRequests9E3(sheetId, startRow, endRow) {
-  const req = [
-    { unmergeCells: { range: { sheetId, startRowIndex: startRow - 1, endRowIndex: endRow, startColumnIndex: 0, endColumnIndex: 8 } } },
-    { repeatCell: { range: { sheetId, startRowIndex: startRow - 1, endRowIndex: endRow, startColumnIndex: 0, endColumnIndex: 8 }, cell: { userEnteredFormat: {} }, fields: "userEnteredFormat" } },
-    { updateCells: { range: { sheetId, startRowIndex: startRow - 1, endRowIndex: endRow, startColumnIndex: 0, endColumnIndex: 8 }, rows: [], fields: "note,dataValidation" } },
-  ];
-  const merge = (r0, r1, c0, c1) => req.push({ mergeCells: { range: { sheetId, startRowIndex: startRow - 1 + r0, endRowIndex: startRow - 1 + r1, startColumnIndex: c0, endColumnIndex: c1 }, mergeType: "MERGE_ALL" } });
-  merge(0, 1, 0, 8); merge(1, 2, 0, 8); merge(2, 3, 0, 8);
-  merge(3, 4, 0, 2);
-  for (let c = 2; c < 8; c++) merge(3, 5, c, c + 1);
-  merge(5, 9, 0, 1); // Sáng 1–4
-  merge(9, 12, 0, 1); // Chiều 5–7
-  merge(12, 13, 0, 8); // Tổng số tiết
-  merge(13, 14, 0, 8); // TỔNG HỢP
-  merge(14, 15, 1, 4); merge(14, 15, 4, 6); merge(14, 15, 6, 8);
-  for (let rr = 15; rr < 31; rr++) {
-    merge(rr, rr + 1, 1, 4); merge(rr, rr + 1, 4, 6); merge(rr, rr + 1, 6, 8);
-  }
-  merge(31, 32, 1, 4); merge(31, 32, 4, 6); merge(31, 32, 6, 8);
-  merge(33, 34, 4, 8);
-  merge(34, 35, 0, 2); merge(34, 35, 2, 5); merge(34, 35, 5, 8); merge(35, 36, 5, 8);
-
-  const all = { sheetId, startRowIndex: startRow - 1, endRowIndex: endRow, startColumnIndex: 0, endColumnIndex: 8 };
-  const border = { style: "SOLID", color: { red: 0.043, green: 0.478, blue: 0.325 } };
-  req.push({ repeatCell: { range: all, cell: { userEnteredFormat: { textFormat: { fontFamily: "Times New Roman", fontSize: 12 }, horizontalAlignment: "CENTER", verticalAlignment: "MIDDLE", wrapStrategy: "WRAP" } }, fields: "userEnteredFormat(textFormat,horizontalAlignment,verticalAlignment,wrapStrategy)" } });
-  req.push({ repeatCell: { range: { sheetId, startRowIndex: startRow - 1 + 3, endRowIndex: startRow - 1 + 13, startColumnIndex: 0, endColumnIndex: 8 }, cell: { userEnteredFormat: { borders: { top: border, bottom: border, left: border, right: border } } }, fields: "userEnteredFormat.borders" } });
-  req.push({ repeatCell: { range: { sheetId, startRowIndex: startRow - 1 + 14, endRowIndex: startRow - 1 + 32, startColumnIndex: 0, endColumnIndex: 8 }, cell: { userEnteredFormat: { borders: { top: border, bottom: border, left: border, right: border } } }, fields: "userEnteredFormat.borders" } });
-  req.push({ repeatCell: { range: { sheetId, startRowIndex: startRow - 1 + 5, endRowIndex: startRow - 1 + 12, startColumnIndex: 2, endColumnIndex: 8 }, cell: { userEnteredFormat: { horizontalAlignment: "LEFT" } }, fields: "userEnteredFormat.horizontalAlignment" } });
-  const green = { red: 0.043, green: 0.478, blue: 0.325 }, mint = { red: 0.918, green: 0.969, blue: 0.937 }, white = { red: 1, green: 1, blue: 1 };
-  [3, 4, 12, 14, 31].forEach((rr) => req.push({ repeatCell: { range: { sheetId, startRowIndex: startRow - 1 + rr, endRowIndex: startRow + rr, startColumnIndex: 0, endColumnIndex: 8 }, cell: { userEnteredFormat: { backgroundColor: green, textFormat: { bold: true, foregroundColor: white, fontFamily: "Times New Roman", fontSize: 12 } } }, fields: "userEnteredFormat(backgroundColor,textFormat)" } }));
-  req.push({ repeatCell: { range: { sheetId, startRowIndex: startRow - 1 + 5, endRowIndex: startRow - 1 + 12, startColumnIndex: 0, endColumnIndex: 8 }, cell: { userEnteredFormat: { backgroundColor: mint } }, fields: "userEnteredFormat.backgroundColor" } });
-  req.push({ repeatCell: { range: { sheetId, startRowIndex: startRow - 1 + 15, endRowIndex: startRow - 1 + 31, startColumnIndex: 0, endColumnIndex: 8 }, cell: { userEnteredFormat: { backgroundColor: mint } }, fields: "userEnteredFormat.backgroundColor" } });
-  return req;
-}
-async function writeMultiTeacherGoogleSheet9E3(options = {}) {
-  const week = Number(options.week || $("weekSelect")?.value || 0);
-  if (!Number.isInteger(week) || week < 1 || week > 35) throw new Error("Chỉ hỗ trợ Tuần 1–35.");
-  const teacherName = clean(selectedTeacher || TEACHER);
-  const btn = document.querySelector("#outputPreviewModal .preview-google-write-week1-35"), old = btn?.textContent;
-  try {
-    if (btn && !options.keepButtonBusy) { btn.disabled = true; btn.textContent = `Đang chuẩn bị Tuần ${week}...`; }
-    const data = await multiGsPreviewData9E3(week);
-    if (!data.length) throw new Error(`Tuần ${week} không có tiết dạy hợp lệ để ghi.`);
-    const missingTitles = data.filter((x) => !clean(x.plan?.title) && !isOptionalPracticeSubject(x.monHoc));
-    if (missingTitles.length) throw new Error(`DỪNG GHI: còn ${missingTitles.length} tiết chưa có tên bài từ PPCT chung.`);
-    const token = options.accessToken || await getGoogleSheetsReadOnlyToken();
-    const target = await multiTeacherPersonalTarget562B9C2B(token, teacherName);
-    const headers = { Authorization: `Bearer ${token}`, "Content-Type": "application/json" };
-    const base = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(target.spreadsheetId)}`;
-    const meta = await gsJson(`${base}?fields=sheets.properties(sheetId,title,gridProperties)`, { headers });
-    const sh = (meta.sheets || []).find((s) => Number(s?.properties?.sheetId) === Number(target.sheetId));
-    if (!sh) throw new Error(`Không tìm thấy tab ${target.sheetName}.`);
-    const needed = MULTI_GS_FIRST_ROW_569D4 + 35 * MULTI_GS_BLOCK_ROWS_569D4;
-    const rowCount = Number(sh?.properties?.gridProperties?.rowCount) || 0;
-    if (rowCount < needed) await gsJson(`${base}:batchUpdate`, { method: "POST", headers, body: JSON.stringify({ requests: [{ appendDimension: { sheetId: target.sheetId, dimension: "ROWS", length: needed - rowCount } }] }) });
-    const { startRow, endRow } = multiGsWeekRange569D4(week), q = gsA1Title(target.sheetName);
-    const existing = await gsJson(`${base}/values/${encodeURIComponent(q + `!A${startRow}:H${endRow}`)}?majorDimension=ROWS`, { headers });
-    const action = (existing.values || []).some((row) => (row || []).some((v) => clean(v))) ? "CẬP NHẬT" : "GHI";
-    const built = multiGsRows9E3(data, week);
-    if (!options.skipConfirm && !confirm(`${action} TUẦN ${week} vào tab ${target.sheetName}?\n\nDữ liệu lấy trực tiếp từ bản Xem trước đang ĐẠT.\nTiết dạy: ${data.length}; Kiêm nhiệm: ${built.concurrent}; Tổng: ${data.length + built.concurrent}.\nVùng: A${startRow}:H${endRow}.`)) return false;
-    if (btn) btn.textContent = `${action === "GHI" ? "Đang ghi" : "Đang cập nhật"} Tuần ${week}...`;
-    await gsJson(`${base}/values/${encodeURIComponent(q + `!A${startRow}:H${endRow}`)}:clear`, { method: "POST", headers, body: "{}" });
-    await gsJson(`${base}:batchUpdate`, { method: "POST", headers, body: JSON.stringify({ requests: multiGsFormatRequests9E3(target.sheetId, startRow, endRow) }) });
-    await gsJson(`${base}/values/${encodeURIComponent(q + `!A${startRow}:H${endRow}`)}?valueInputOption=USER_ENTERED`, { method: "PUT", headers, body: JSON.stringify({ range: `${q}!A${startRow}:H${endRow}`, majorDimension: "ROWS", values: built.rows }) });
-    const verify = await gsJson(`${base}/values/${encodeURIComponent(q + `!A${startRow}:H${endRow}`)}?majorDimension=ROWS`, { headers });
-    const vv = verify.values || [];
-    const totalText = clean(vv?.[12]?.[0]);
-    const totalValue = Number(vv?.[31]?.[4]);
-    if (!totalText.includes(String(data.length)) || totalValue !== data.length + built.concurrent)
-      throw new Error(`Google Sheet đã nhận lệnh nhưng kiểm tra lại chưa khớp tổng số (${data.length} / ${data.length + built.concurrent}).`);
-    if (!options.silentSuccess) alert(`${action} TUẦN ${week} THÀNH CÔNG\n\nTab: ${target.sheetName}\nTiết dạy: ${data.length}\nKiêm nhiệm: ${built.concurrent}\nTổng: ${data.length + built.concurrent}\n\nDữ liệu Google Sheet đã được đối chiếu lại sau khi ghi.`);
-    return true;
-  } catch (err) {
-    console.error("[TKB] 5.6.2B.9E.3 Ghi/Cập nhật Google Sheet đa GV:", err);
-    if (options.throwOnError) throw err;
-    alert(`CHƯA GHI/CẬP NHẬT ĐƯỢC GOOGLE SHEET\n\n${err?.message || err}`);
-    return false;
-  } finally {
-    if (btn && !options.keepButtonBusy) { btn.disabled = false; btn.textContent = old || `Ghi/Cập nhật Tuần ${week} vào Google Sheet`; }
-  }
-}
-async function resetMultiTeacherGoogleSheet9E3(firstWeek, lastWeek) {
-  const from = Math.max(1, Math.min(35, Number(firstWeek) || 1)), to = Math.max(from, Math.min(35, Number(lastWeek) || from));
-  const teacherName = clean(selectedTeacher || TEACHER), btn = document.querySelector("#outputPreviewModal .preview-google-reset-weeks"), old = btn?.textContent;
-  try {
-    if (btn) { btn.disabled = true; btn.textContent = "Đang kiểm tra..."; }
-    const token = await getGoogleSheetsReadOnlyToken(), target = await multiTeacherPersonalTarget562B9C2B(token, teacherName);
-    const headers = { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, base = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(target.spreadsheetId)}`, q = gsA1Title(target.sheetName);
-    const r1 = multiGsWeekRange569D4(from), r2 = multiGsWeekRange569D4(to), label = from === to ? `Tuần ${from}` : `Tuần ${from}–${to}`;
-    if (!confirm(`LÀM MỚI ${label} trên tab ${target.sheetName}?\n\nChỉ vùng A${r1.startRow}:H${r2.endRow} được xóa.\nCác tuần ngoài phạm vi và các tab giáo viên khác được giữ nguyên.`)) return false;
-    if (btn) btn.textContent = `Đang làm mới ${label}...`;
-    await gsJson(`${base}/values/${encodeURIComponent(q + `!A${r1.startRow}:H${r2.endRow}`)}:clear`, { method: "POST", headers, body: "{}" });
-    await gsJson(`${base}:batchUpdate`, { method: "POST", headers, body: JSON.stringify({ requests: [
-      { unmergeCells: { range: { sheetId: target.sheetId, startRowIndex: r1.startRow - 1, endRowIndex: r2.endRow, startColumnIndex: 0, endColumnIndex: 8 } } },
-      { repeatCell: { range: { sheetId: target.sheetId, startRowIndex: r1.startRow - 1, endRowIndex: r2.endRow, startColumnIndex: 0, endColumnIndex: 8 }, cell: { userEnteredFormat: {} }, fields: "userEnteredFormat" } },
-      { updateCells: { range: { sheetId: target.sheetId, startRowIndex: r1.startRow - 1, endRowIndex: r2.endRow, startColumnIndex: 0, endColumnIndex: 8 }, rows: [], fields: "note,dataValidation" } }
-    ] }) });
-    const verify = await gsJson(`${base}/values/${encodeURIComponent(q + `!A${r1.startRow}:H${r2.endRow}`)}?majorDimension=ROWS`, { headers });
-    const remain = [];
-    (verify.values || []).forEach((row, i) => { if ((row || []).some((v) => clean(v))) remain.push(r1.startRow + i); });
-    if (remain.length) throw new Error(`Vẫn còn dữ liệu tại dòng ${remain.slice(0, 5).join(", ")}.`);
-    alert(`LÀM MỚI ${label.toUpperCase()} THÀNH CÔNG\n\nTab: ${target.sheetName}\nVùng đã làm sạch: A${r1.startRow}:H${r2.endRow}.\nCác tuần và giáo viên khác được giữ nguyên.`);
-    return true;
-  } catch (err) {
-    console.error("[TKB] 5.6.2B.9E.3 Làm mới Google Sheet đa GV:", err);
-    alert(`CHƯA LÀM MỚI ĐƯỢC GOOGLE SHEET\n\n${err?.message || err}`);
-    return false;
-  } finally {
-    if (btn) { btn.disabled = false; btn.textContent = old || "Làm mới"; }
-  }
-}
-const exportSelectedWeek1To35ToGoogleSheetBefore9E3 = exportSelectedWeek1To35ToGoogleSheet;
-exportSelectedWeek1To35ToGoogleSheet = async function (options = {}) {
-  const teacherName = clean(selectedTeacher || TEACHER), isDam = normalizeTeacherName(teacherName) === normalizeTeacherName(TEACHER);
-  if (isDam) return exportSelectedWeek1To35ToGoogleSheetBefore9E3(options);
-  return await writeMultiTeacherGoogleSheet9E3(options);
-};
-const resetGoogleSheetWeekRangeBefore9E3 = resetGoogleSheetWeekRange;
-resetGoogleSheetWeekRange = async function (firstWeek, lastWeek) {
-  const teacherName = clean(selectedTeacher || TEACHER), isDam = normalizeTeacherName(teacherName) === normalizeTeacherName(TEACHER);
-  if (isDam) return resetGoogleSheetWeekRangeBefore9E3(firstWeek, lastWeek);
-  return await resetMultiTeacherGoogleSheet9E3(firstWeek, lastWeek);
-};
-
-// BƯỚC 5.6.2B.9E.4 - ỔN ĐỊNH GOOGLE SHEET ĐA GIÁO VIÊN.
-// Gốc lỗi đã xác định:
-// 1) Sheet thử nghiệm cũ dùng 22 dòng/tuần (Tuần 5 ở dòng 96–117), trong khi cấu trúc mới dùng 36 dòng/tuần
-//    (Tuần 5 ở dòng 152–187). Vì vậy Làm mới/Ghi mới có thể tác động vùng khác, còn dữ liệu cũ vẫn nằm nguyên.
-// 2) Token Google trước đây dùng chung giữa Sheet công vụ và Sheet Gmail cá nhân. Khi đổi tài khoản Google,
-//    giáo viên khác có thể không có quyền ghi vào file cá nhân dù Đậm vẫn ghi được file công vụ.
-// 3) Không được xem hai tiết là trùng chỉ vì tên bài giống nhau. Chỉ loại bản ghi trùng hoàn toàn cùng vị trí + lớp + môn;
-//    nếu cùng một vị trí có hai tiết khác nhau thì dừng để báo dữ liệu nguồn xung đột.
-// Luồng Google Sheet công vụ của Đậm giữ nguyên hoàn toàn.
-const MULTI_GS_LAYOUT_MARKER_9E4 = "__TKB_MULTI_GS_V2_36__";
-const MULTI_GS_LAYOUT_MARKER_CELL_9E4 = "L1";
-let multiGsPersonalAccessToken9E4 = "";
-let multiGsPersonalTokenExpiresAt9E4 = 0;
-let multiGsPersonalTokenPromise9E4 = null;
-
-function clearMultiGsPersonalToken9E4() {
-  multiGsPersonalAccessToken9E4 = "";
-  multiGsPersonalTokenExpiresAt9E4 = 0;
-  multiGsPersonalTokenPromise9E4 = null;
-}
-
-async function getMultiGsPersonalToken9E4(forceAccountChoice = false) {
-  const now = Date.now();
-  if (!forceAccountChoice && multiGsPersonalAccessToken9E4 && now < multiGsPersonalTokenExpiresAt9E4 - 60000) {
-    return multiGsPersonalAccessToken9E4;
-  }
-  if (multiGsPersonalTokenPromise9E4) return multiGsPersonalTokenPromise9E4;
-  await loadGoogleIdentityServices();
-  multiGsPersonalTokenPromise9E4 = new Promise((resolve, reject) => {
-    const client = google.accounts.oauth2.initTokenClient({
-      client_id: GOOGLE_SHEETS_CLIENT_ID,
-      scope: GOOGLE_SHEETS_SCOPE,
-      callback: (r) => {
-        multiGsPersonalTokenPromise9E4 = null;
-        if (r?.error) return reject(new Error(r.error_description || r.error));
-        if (!r?.access_token) return reject(new Error("Google không trả về access token cho Sheet cá nhân."));
-        multiGsPersonalAccessToken9E4 = r.access_token;
-        const expiresIn = Math.max(60, Number(r.expires_in) || 3600);
-        multiGsPersonalTokenExpiresAt9E4 = Date.now() + expiresIn * 1000;
-        resolve(multiGsPersonalAccessToken9E4);
-      },
-    });
-    // Sheet đa giáo viên nằm trên Gmail cá nhân, tách khỏi tài khoản công vụ của Đậm.
-    // Lần đầu mỗi phiên luôn cho chọn đúng tài khoản; sau đó tái sử dụng token trong phiên.
-    client.requestAccessToken({ prompt: forceAccountChoice || !multiGsPersonalAccessToken9E4 ? "select_account" : "" });
-  });
-  return multiGsPersonalTokenPromise9E4;
-}
-
-async function multiGsPersonalContext9E4(teacherName, forceAccountChoice = false) {
-  let token = await getMultiGsPersonalToken9E4(forceAccountChoice);
-  let target;
-  try {
-    target = await multiTeacherPersonalTarget562B9C2B(token, teacherName);
-  } catch (err) {
-    // Nếu token đang thuộc tài khoản Google khác, cho chọn lại đúng Gmail cá nhân một lần.
-    const msg = String(err?.message || err || "").toLowerCase();
-    if (!forceAccountChoice && /permission|not found|không tìm thấy|requested entity|403|404|forbidden|denied/.test(msg)) {
-      clearMultiGsPersonalToken9E4();
-      token = await getMultiGsPersonalToken9E4(true);
-      target = await multiTeacherPersonalTarget562B9C2B(token, teacherName);
-    } else throw err;
-  }
-  const headers = { Authorization: `Bearer ${token}`, "Content-Type": "application/json" };
-  const base = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(target.spreadsheetId)}`;
-  const q = gsA1Title(target.sheetName);
-  let meta = await gsJson(`${base}?fields=sheets.properties(sheetId,title,gridProperties)`, { headers });
-  let sh = (meta.sheets || []).find((s) => Number(s?.properties?.sheetId) === Number(target.sheetId));
-  if (!sh) throw new Error(`Không tìm thấy tab ${target.sheetName}.`);
-  const neededRows = MULTI_GS_FIRST_ROW_569D4 + 35 * MULTI_GS_BLOCK_ROWS_569D4;
-  const rowCount = Number(sh?.properties?.gridProperties?.rowCount) || 0;
-  const colCount = Number(sh?.properties?.gridProperties?.columnCount) || 0;
-  const grow = [];
-  if (rowCount < neededRows) grow.push({ appendDimension: { sheetId: target.sheetId, dimension: "ROWS", length: neededRows - rowCount } });
-  if (colCount < 12) grow.push({ appendDimension: { sheetId: target.sheetId, dimension: "COLUMNS", length: 12 - colCount } });
-  if (grow.length) {
-    await gsJson(`${base}:batchUpdate`, { method: "POST", headers, body: JSON.stringify({ requests: grow }) });
-    meta = await gsJson(`${base}?fields=sheets.properties(sheetId,title,gridProperties)`, { headers });
-    sh = (meta.sheets || []).find((s) => Number(s?.properties?.sheetId) === Number(target.sheetId));
-  }
-  return { token, target, headers, base, q, sh };
-}
-
-async function ensureMultiGsLayout9E4(ctx, { allowPrompt = true } = {}) {
-  const { target, headers, base, q, sh } = ctx;
-  const markerRead = await gsJson(`${base}/values/${encodeURIComponent(q + `!${MULTI_GS_LAYOUT_MARKER_CELL_9E4}`)}`, { headers });
-  const marker = clean(markerRead?.values?.[0]?.[0]);
-  if (marker === MULTI_GS_LAYOUT_MARKER_9E4) return { migrated: false };
-
-  const rowCount = Math.max(Number(sh?.properties?.gridProperties?.rowCount) || 0, MULTI_GS_FIRST_ROW_569D4 + 35 * MULTI_GS_BLOCK_ROWS_569D4);
-  const legacyProbe = await gsJson(`${base}/values/${encodeURIComponent(q + `!A8:H${Math.min(rowCount, 1400)}`)}?majorDimension=ROWS`, { headers });
-  const hasOldData = (legacyProbe.values || []).some((row) => (row || []).some((v) => clean(v)));
-  if (hasOldData && allowPrompt) {
-    const ok = confirm(
-      `CHUYỂN TAB ${target.sheetName} SANG CẤU TRÚC GOOGLE SHEET MỚI?\n\n` +
-      `Tab này còn dữ liệu theo cấu trúc cũ 22 dòng/tuần. Cấu trúc mới dùng 36 dòng/tuần để TỔNG HỢP mỗi môn một dòng.\n\n` +
-      `Nếu tiếp tục, app sẽ XÓA TOÀN BỘ dữ liệu kế hoạch cũ trong A8:H${rowCount} của riêng tab ${target.sheetName}, ` +
-      `sau đó từ nay Ghi/Cập nhật và Làm mới sẽ dùng đúng một cấu trúc mới, không còn chồng vùng tuần.\n\n` +
-      `Các tab giáo viên khác và Google Sheet công vụ của Đậm không bị ảnh hưởng.`
-    );
-    if (!ok) throw new Error("Đã hủy chuyển cấu trúc Google Sheet đa giáo viên.");
-  }
-
-  // Xóa sạch vùng kế hoạch cũ của CHÍNH tab này một lần để chấm dứt chồng lấn 22/36 dòng.
-  await gsJson(`${base}/values/${encodeURIComponent(q + `!A8:H${rowCount}`)}:clear`, { method: "POST", headers, body: "{}" });
-  await gsJson(`${base}:batchUpdate`, {
-    method: "POST", headers,
-    body: JSON.stringify({ requests: [
-      { unmergeCells: { range: { sheetId: target.sheetId, startRowIndex: 7, endRowIndex: rowCount, startColumnIndex: 0, endColumnIndex: 8 } } },
-      { repeatCell: { range: { sheetId: target.sheetId, startRowIndex: 7, endRowIndex: rowCount, startColumnIndex: 0, endColumnIndex: 8 }, cell: { userEnteredFormat: {} }, fields: "userEnteredFormat" } },
-      { updateCells: { range: { sheetId: target.sheetId, startRowIndex: 7, endRowIndex: rowCount, startColumnIndex: 0, endColumnIndex: 8 }, rows: [], fields: "note,dataValidation" } },
-      { updateDimensionProperties: { range: { sheetId: target.sheetId, dimension: "COLUMNS", startIndex: 11, endIndex: 12 }, properties: { hiddenByUser: true }, fields: "hiddenByUser" } },
-    ] }),
-  });
-  await gsJson(`${base}/values/${encodeURIComponent(q + `!L1`)}?valueInputOption=RAW`, {
-    method: "PUT", headers,
-    body: JSON.stringify({ range: `${q}!L1`, majorDimension: "ROWS", values: [[MULTI_GS_LAYOUT_MARKER_9E4]] }),
-  });
-  return { migrated: true };
-}
-
-async function multiGsPreviewData9E4(week) {
-  const raw = await withOutputWeekAsync561B4B(week, async () =>
-    validFormalOutputData561B7B(await sharedCurriculumPreviewData()).filter((x) => isOfficialOutputPeriod(x)),
-  );
-  const exact = new Set();
-  const slotMap = new Map();
-  const out = [];
-  for (const x of raw) {
-    const p = outputDisplayPeriod(x);
-    const day = clean(x.thu);
-    const subject = normalizeSubjectForPlan(x.monHoc);
-    const cls = clean(x.lop);
-    const slot = `${normKey(day)}|${p}`;
-    const identity = `${slot}|${normKey(cls)}|${normKey(subject)}`;
-    // Chỉ loại trùng hoàn toàn; KHÔNG dùng tên bài để xác định trùng.
-    if (exact.has(identity)) continue;
-    exact.add(identity);
-    if (slotMap.has(slot) && slotMap.get(slot) !== identity) {
-      const a = out.find((y) => `${normKey(clean(y.thu))}|${outputDisplayPeriod(y)}` === slot);
-      throw new Error(
-        `DỪNG GHI: trùng vị trí Thứ ${day} - Tiết ${p}: ` +
-        `${normalizeSubjectForPlan(a?.monHoc)} ${clean(a?.lop)} và ${subject} ${cls}. Hãy kiểm tra TKB nguồn.`
-      );
-    }
-    slotMap.set(slot, identity);
-    out.push(x);
-  }
-  return out;
-}
-
-function multiGsRows9E4(data, week) {
-  // Dùng đúng cấu trúc 36 dòng đã thống nhất; không đọc lại dữ liệu từ Google Sheet cũ.
-  return multiGsRows9E3(data, week);
-}
-
-async function writeMultiTeacherGoogleSheet9E4(options = {}) {
-  const week = Number(options.week || $("weekSelect")?.value || 0);
-  if (!Number.isInteger(week) || week < 1 || week > 35) throw new Error("Chỉ hỗ trợ Tuần 1–35.");
-  const teacherName = clean(selectedTeacher || TEACHER);
-  const btn = document.querySelector("#outputPreviewModal .preview-google-write-week1-35"), old = btn?.textContent;
-  try {
-    if (btn && !options.keepButtonBusy) { btn.disabled = true; btn.textContent = `Đang chuẩn bị Tuần ${week}...`; }
-    const data = await multiGsPreviewData9E4(week);
-    if (!data.length) throw new Error(`Tuần ${week} không có tiết dạy hợp lệ để ghi.`);
-    const missingTitles = data.filter((x) => !clean(x.plan?.title) && !isOptionalPracticeSubject(x.monHoc));
-    if (missingTitles.length) throw new Error(`DỪNG GHI: còn ${missingTitles.length} tiết chưa có tên bài từ PPCT chung.`);
-
-    // Luôn dùng token RIÊNG của Gmail cá nhân, không nhận accessToken chung từ luồng công vụ.
-    const ctx = await multiGsPersonalContext9E4(teacherName);
-    const mig = await ensureMultiGsLayout9E4(ctx, { allowPrompt: !options.skipConfirm });
-    const { target, headers, base, q } = ctx;
-    const { startRow, endRow } = multiGsWeekRange569D4(week);
-    const existing = await gsJson(`${base}/values/${encodeURIComponent(q + `!A${startRow}:H${endRow}`)}?majorDimension=ROWS`, { headers });
-    const action = (existing.values || []).some((row) => (row || []).some((v) => clean(v))) ? "CẬP NHẬT" : "GHI";
-    const built = multiGsRows9E4(data, week);
-    if (!options.skipConfirm && !confirm(
-      `${action} TUẦN ${week} vào tab ${target.sheetName}?\n\n` +
-      `Nguồn: chính dữ liệu Xem trước đang ĐẠT.\nTiết dạy: ${data.length}; Kiêm nhiệm: ${built.concurrent}; Tổng: ${data.length + built.concurrent}.\n` +
-      `Vùng mới: A${startRow}:H${endRow}.${mig.migrated ? "\n\nTab vừa được chuyển khỏi cấu trúc cũ; dữ liệu cũ đã được xóa sạch." : ""}`
-    )) return false;
-
-    if (btn) btn.textContent = `${action === "GHI" ? "Đang ghi" : "Đang cập nhật"} Tuần ${week}...`;
-    await gsJson(`${base}/values/${encodeURIComponent(q + `!A${startRow}:H${endRow}`)}:clear`, { method: "POST", headers, body: "{}" });
-    await gsJson(`${base}:batchUpdate`, { method: "POST", headers, body: JSON.stringify({ requests: multiGsFormatRequests9E3(target.sheetId, startRow, endRow) }) });
-    await gsJson(`${base}/values/${encodeURIComponent(q + `!A${startRow}:H${endRow}`)}?valueInputOption=USER_ENTERED`, {
-      method: "PUT", headers,
-      body: JSON.stringify({ range: `${q}!A${startRow}:H${endRow}`, majorDimension: "ROWS", values: built.rows }),
-    });
-
-    const verify = await gsJson(`${base}/values/${encodeURIComponent(q + `!A${startRow}:H${endRow}`)}?majorDimension=ROWS`, { headers });
-    const vv = verify.values || [];
-    const totalText = clean(vv?.[12]?.[0]);
-    const totalValue = Number(vv?.[31]?.[4]);
-    if (!totalText.includes(String(data.length)) || totalValue !== data.length + built.concurrent) {
-      throw new Error(`Google Sheet đã nhận lệnh nhưng kiểm tra lại chưa khớp tổng số (${data.length} / ${data.length + built.concurrent}).`);
-    }
-    if (!options.silentSuccess) alert(
-      `${action} TUẦN ${week} THÀNH CÔNG\n\nTab: ${target.sheetName}\nTiết dạy: ${data.length}\nKiêm nhiệm: ${built.concurrent}\nTổng: ${data.length + built.concurrent}\n\nĐã đọc kiểm tra lại dữ liệu sau khi ghi.`
-    );
-    return true;
-  } catch (err) {
-    console.error("[TKB] 5.6.2B.9E.4 Ghi/Cập nhật Google Sheet đa GV:", err);
-    if (options.throwOnError) throw err;
-    alert(`CHƯA GHI/CẬP NHẬT ĐƯỢC GOOGLE SHEET\n\n${err?.message || err}`);
-    return false;
-  } finally {
-    if (btn && !options.keepButtonBusy) { btn.disabled = false; btn.textContent = old || `Ghi/Cập nhật Tuần ${week} vào Google Sheet`; }
-  }
-}
-
-async function resetMultiTeacherGoogleSheet9E4(firstWeek, lastWeek) {
-  const from = Math.max(1, Math.min(35, Number(firstWeek) || 1));
-  const to = Math.max(from, Math.min(35, Number(lastWeek) || from));
-  const teacherName = clean(selectedTeacher || TEACHER);
-  const btn = document.querySelector("#outputPreviewModal .preview-google-reset-weeks"), old = btn?.textContent;
-  try {
-    if (btn) { btn.disabled = true; btn.textContent = "Đang kiểm tra..."; }
-    const ctx = await multiGsPersonalContext9E4(teacherName);
-    const mig = await ensureMultiGsLayout9E4(ctx, { allowPrompt: true });
-    const { target, headers, base, q } = ctx;
-    const r1 = multiGsWeekRange569D4(from), r2 = multiGsWeekRange569D4(to);
-    const label = from === to ? `Tuần ${from}` : `Tuần ${from}–${to}`;
-    if (!mig.migrated && !confirm(
-      `LÀM MỚI ${label} trên tab ${target.sheetName}?\n\n` +
-      `Chỉ vùng cấu trúc mới A${r1.startRow}:H${r2.endRow} được xóa. Các tuần và tab khác được giữ nguyên.`
-    )) return false;
-    if (btn) btn.textContent = `Đang làm mới ${label}...`;
-
-    await gsJson(`${base}/values/${encodeURIComponent(q + `!A${r1.startRow}:H${r2.endRow}`)}:clear`, { method: "POST", headers, body: "{}" });
-    await gsJson(`${base}:batchUpdate`, { method: "POST", headers, body: JSON.stringify({ requests: [
-      { unmergeCells: { range: { sheetId: target.sheetId, startRowIndex: r1.startRow - 1, endRowIndex: r2.endRow, startColumnIndex: 0, endColumnIndex: 8 } } },
-      { repeatCell: { range: { sheetId: target.sheetId, startRowIndex: r1.startRow - 1, endRowIndex: r2.endRow, startColumnIndex: 0, endColumnIndex: 8 }, cell: { userEnteredFormat: {} }, fields: "userEnteredFormat" } },
-      { updateCells: { range: { sheetId: target.sheetId, startRowIndex: r1.startRow - 1, endRowIndex: r2.endRow, startColumnIndex: 0, endColumnIndex: 8 }, rows: [], fields: "note,dataValidation" } },
-    ] }) });
-
-    const verify = await gsJson(`${base}/values/${encodeURIComponent(q + `!A${r1.startRow}:H${r2.endRow}`)}?majorDimension=ROWS`, { headers });
-    const remain = [];
-    (verify.values || []).forEach((row, i) => { if ((row || []).some((v) => clean(v))) remain.push(r1.startRow + i); });
-    if (remain.length) throw new Error(`Vẫn còn dữ liệu tại dòng ${remain.slice(0, 5).join(", ")}.`);
-    alert(
-      `${mig.migrated ? "ĐÃ CHUYỂN CẤU TRÚC VÀ XÓA DỮ LIỆU CŨ" : `LÀM MỚI ${label.toUpperCase()} THÀNH CÔNG`}\n\n` +
-      `Tab: ${target.sheetName}\nVùng hiện tại đã sạch: A${r1.startRow}:H${r2.endRow}.\n` +
-      `${mig.migrated ? "Toàn bộ dữ liệu cấu trúc cũ 22 dòng/tuần của tab này cũng đã được xóa; từ nay không còn chồng vùng tuần." : "Các tuần và giáo viên khác được giữ nguyên."}`
-    );
-    return true;
-  } catch (err) {
-    console.error("[TKB] 5.6.2B.9E.4 Làm mới Google Sheet đa GV:", err);
-    alert(`CHƯA LÀM MỚI ĐƯỢC GOOGLE SHEET\n\n${err?.message || err}`);
-    return false;
-  } finally {
-    if (btn) { btn.disabled = false; btn.textContent = old || "Làm mới"; }
-  }
-}
-
-const exportSelectedWeek1To35ToGoogleSheetBefore9E4 = exportSelectedWeek1To35ToGoogleSheet;
-exportSelectedWeek1To35ToGoogleSheet = async function (options = {}) {
-  const teacherName = clean(selectedTeacher || TEACHER);
-  const isDam = normalizeTeacherName(teacherName) === normalizeTeacherName(TEACHER);
-  if (isDam) return exportSelectedWeek1To35ToGoogleSheetBefore9E4(options);
-  return await writeMultiTeacherGoogleSheet9E4(options);
-};
-
-const resetGoogleSheetWeekRangeBefore9E4 = resetGoogleSheetWeekRange;
-resetGoogleSheetWeekRange = async function (firstWeek, lastWeek) {
-  const teacherName = clean(selectedTeacher || TEACHER);
-  const isDam = normalizeTeacherName(teacherName) === normalizeTeacherName(TEACHER);
-  if (isDam) return resetGoogleSheetWeekRangeBefore9E4(firstWeek, lastWeek);
-  return await resetMultiTeacherGoogleSheet9E4(firstWeek, lastWeek);
-};
-
-// Multi-week: không xin token công vụ trước khi ghi Sheet cá nhân.
-const exportSelectedWeeksToGoogleSheetBefore9E4 = exportSelectedWeeksToGoogleSheet;
-exportSelectedWeeksToGoogleSheet = async function (weeks) {
-  const teacherName = clean(selectedTeacher || TEACHER);
-  const isDam = normalizeTeacherName(teacherName) === normalizeTeacherName(TEACHER);
-  if (isDam) return exportSelectedWeeksToGoogleSheetBefore9E4(weeks);
-  const chosen = normalizeOutputWeeks(weeks);
-  if (!chosen.length) return alert("Hãy chọn ít nhất 1 tuần.");
-  if (chosen.length === 1) {
-    return await withOutputWeekAsync561B4B(chosen[0], () => writeMultiTeacherGoogleSheet9E4({ week: chosen[0] }));
-  }
-  if (!confirm(`GHI/CẬP NHẬT ${chosen.length} TUẦN vào Google Sheet cá nhân của ${teacherName}?\n\n${chosen.map((w) => `Tuần ${w}`).join(", ")}`)) return false;
-  const btn = document.querySelector("#outputPreviewModal .preview-google-write-week1-35");
-  const old = btn?.textContent, ok = [], failed = [];
-  try {
-    if (btn) { btn.disabled = true; btn.textContent = "Đang xác thực Gmail cá nhân..."; }
-    // Xin đúng token cá nhân một lần, các tuần sau tái sử dụng token cache 9E.4.
-    await getMultiGsPersonalToken9E4(false);
-    for (let i = 0; i < chosen.length; i++) {
-      const week = chosen[i];
-      if (btn) btn.textContent = `Đang ghi ${i + 1}/${chosen.length} · Tuần ${week}...`;
-      try {
-        const result = await withOutputWeekAsync561B4B(week, () => writeMultiTeacherGoogleSheet9E4({
-          week, skipConfirm: true, silentSuccess: true, throwOnError: true, keepButtonBusy: true,
-        }));
-        if (result === true) ok.push(week); else failed.push({ week, error: "Không hoàn tất" });
-      } catch (err) { failed.push({ week, error: err?.message || String(err) }); }
-    }
-  } finally {
-    if (btn) { btn.disabled = false; btn.textContent = old || "Ghi/Cập nhật Google Sheet"; }
-  }
-  let msg = `ĐÃ XỬ LÝ ${chosen.length} TUẦN\n\nThành công: ${ok.length}/${chosen.length}`;
-  if (ok.length) msg += `\nTuần đã cập nhật: ${ok.join(", ")}`;
-  if (failed.length) msg += `\n\nChưa cập nhật: ${failed.map((x) => `Tuần ${x.week}: ${x.error}`).join("\n")}`;
-  alert(msg);
-  return failed.length === 0;
 };

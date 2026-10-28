@@ -1,0 +1,19 @@
+THỜI KHÓA BIỂU – ĐỒNG BỘ TUẦN LÀM VIỆC (29/10/2026)
+
+Mục tiêu: Một tài khoản Supabase, cùng năm học 2026-2027, dùng chung 1 tuần làm việc trên mọi máy. Tuần không tự nhảy theo ngày. Người dùng chọn tuần trên máy A -> lưu Supabase -> máy B đang mở sẽ cập nhật trong khoảng 15 giây; khi máy B được mở/tập trung lại sẽ kiểm tra ngay. Sau khi đóng và mở lại vẫn giữ tuần đang lưu.
+
+BẮT BUỘC MỘT LẦN:
+1) Sao lưu bản website đang chạy và các dữ liệu quan trọng.
+2) Supabase -> SQL Editor -> New query: dán toàn bộ file BUOC-DONG-BO-TUAN-LAM-VIEC-SUPABASE.sql -> Run.
+3) Tải lên host 3 file index.html, app.js, styles.css của bản này. Không cần xóa bảng TKB/Phụ lục 2 cũ.
+4) Mở app tại cùng URL và đăng nhập CÙNG tài khoản Supabase trên các máy.
+5) Máy 1 chọn Tuần 12. Chờ dòng trạng thái báo 'Đã lưu, đồng bộ các máy'. Máy 2 phải nhận Tuần 12 sau tối đa khoảng 15 giây nếu trang đang mở, có mạng và máy không ngủ. Đóng/mở lại máy 2, tuần vẫn là 12. Thử đổi ngược về Tuần 13 trên máy 2.
+6) Khi máy đang mất mạng: tuần vẫn lưu cục bộ và hiện thông báo chưa đồng bộ. Sau khi có mạng, ứng dụng sẽ tự thử lưu lại; không hiểu thông báo lưu cục bộ là đã đồng bộ thành công.
+
+LƯU Ý:
+- Không dùng chung một tài khoản Supabase thì không đồng bộ chung (dữ liệu được phân tách theo từng tài khoản/năm học).
+- Chỉ đồng bộ ô 'Tuần' trong mục 'Tuần làm việc'; KHÔNG đổi mốc 'TKB hiệu lực từ'.
+- Nếu hai máy đổi tuần gần như cùng lúc, lần ghi lên Supabase sau cùng sẽ là giá trị chung; tránh đổi đồng thời.
+- Nếu báo lỗi 'relation tkb_user_week_state does not exist' hoặc 'Could not find the table', cần chạy SQL trên ĐÚNG dự án Supabase mà app đang kết nối.
+- Nếu SQL chưa chạy, tuần vẫn xem được trên máy nhưng KHÔNG đồng bộ; lỗi sẽ hiện ở trạng thái cạnh ô Tuần.
+- Không có quyền truy cập Supabase thật trong môi trường đóng gói, phải kiểm tra trên ít nhất 2 máy để xác nhận đồng bộ thật.
