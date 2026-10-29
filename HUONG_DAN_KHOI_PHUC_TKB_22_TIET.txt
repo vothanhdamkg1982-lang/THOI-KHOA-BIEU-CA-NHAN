@@ -1,0 +1,22 @@
+KHÔI PHỤC THỜI KHÓA BIỂU BỊ THIẾU THỨ HAI, THỨ BA
+===================================================
+
+1. Sao lưu thư mục mã nguồn VS Code và tránh xóa bản TKB trên Supabase.
+2. Sao chép index.html, app.js, styles.css của gói này vào thư mục web app.
+3. Tải lại trang (Ctrl+F5), đăng nhập đúng tài khoản giáo viên.
+4. Vào KHO TKB, bấm "SAO LƯU TOÀN BỘ KHO TKB" và giữ tệp JSON.
+5. Tại ô "Hiệu lực từ", chọn TUẦN 9 (nếu khôi phục TKB tháng 11).
+6. Bấm "TẢI / CẬP NHẬT TKB", chọn file gốc "TKB THÁNG 11.2026 (2.11).xlsx".
+7. Ứng dụng hiển thị số tiết đọc được và đối chiếu số tiết/ ngày. Chỉ bấm OK nếu đúng.
+   Bản đã có vẫn được GIỮ; bản mới sẽ được ưu tiên cho Tuần 9 trở đi.
+8. Chọn Tuần 9, bộ lọc "Tất cả", kiểm tra: Tổng 22 tiết, thứ Hai 3 tiết,
+   thứ Ba 5 tiết (Theo bản Excel gốc đã kiểm tra).
+9. Sau đó thử Lịch tuần, chi tiết HĐTN và đồng bộ trên máy thứ hai.
+
+LƯU Ý:
+- Không chạy lại SQL. Không xóa/xóa bộ nhớ đệm trình duyệt nếu chưa sao lưu.
+- TKB tháng 11 có đủ 22 tiết trong file Excel gốc. Nếu bản trên Supabase thiếu
+  dữ liệu, việc thay mã nguồn KHÔNG tự sinh lại 7 tiết; phải tải lại Excel gốc.
+- Một bản TKB bị xóa khỏi cả Supabase và mọi bản sao không thể khôi phục
+  chỉ bằng mã nguồn; cần tìm file Excel gốc hoặc bản sao lưu.
+- Các tuần khác phải chọn đúng mốc hiệu lực trước khi tải file tương ứng.

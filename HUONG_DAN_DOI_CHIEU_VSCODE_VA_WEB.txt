@@ -1,0 +1,27 @@
+TKB GV ĐẬM – CHẨN ĐOÁN KHÁC BIỆT BẢN VS CODE VÀ WEBSITE
+Ngày: 29/10/2026
+
+MỤC ĐÍCH
+Website công khai đang hiện đủ số tiết, nhưng bản chạy từ VS Code hiện 15 tiết. Không được tự kết luận dữ liệu Supabase đã mất. Tách biệt localStorage của file:/// , http://localhost và https://... là bình thường. Bản này cung cấp công cụ ĐỐI CHIẾU NGUỒN DỮ LIỆU chỉ đọc.
+
+CẬP NHẬT AN TOÀN TRÊN MÁY TÍNH
+1. SAO LƯU thư mục mã nguồn VS Code hiện tại.
+2. Sao chép, ghi đè chỉ ba tệp index.html, app.js, styles.css từ gói này vào thư mục VS Code.
+3. KHÔNG ghi đè website đang chạy tốt. KHÔNG xóa phiên bản TKB trên Supabase.
+4. Chạy ứng dụng VS Code theo địa chỉ mà bạn dùng (nên dùng Live Server). Đăng nhập đúng cùng tài khoản giáo viên.
+5. Chọn giáo viên Đậm và Tuần 9.
+6. Vào Kho lưu trữ, bấm «ĐỐI CHIẾU NGUỒN DỮ LIỆU».
+
+ĐỌC KẾT QUẢ
+- Nếu «Kho máy này: 15 tiết» và «Kho Supabase: 22 tiết», ứng dụng mở nút «NẠP LẠI TỪ SUPABASE».
+  Bấm nút, xác nhận, giữ file sao lưu JSON tải xuống. Bản này chỉ ĐỌC từ Supabase; không thêm/sửa/xóa trên server.
+  Kiểm tra sau Ctrl+F5 còn đủ 22 tiết và thứ Hai, thứ Ba.
+- Nếu «CHƯA ĐĂNG NHẬP», vui lòng đăng nhập; bộ nhớ website và bản chạy VS Code khác nhau.
+- Nếu «Kho Supabase: 15 tiết» nhưng WEBSITE HIỆN ĐỦ 22 tiết: KHÔNG bấm nạp lại hoặc ghi đè website. Hãy gửi ảnh chẩn đoán và ảnh trạng thái đăng nhập của hai địa chỉ để phân biệt các tài khoản/kho cache.
+- Nếu báo lỗi không đọc được Supabase: không xóa localStorage và không nhập liên tục cùng Excel; chụp thông báo để kiểm tra kết nối/phân quyền.
+
+GIỚI HẠN KIỂM THỬ
+Đã kiểm tra cú pháp JS; giao diện chẩn đoán trên Chromium khi chưa đăng nhập; trường hợp mô phỏng kho cục bộ 15 tiết/kho Supabase 22 tiết; và nạp lại an toàn từ dữ liệu Supabase mô phỏng. Đã kiểm tra bộ đọc tệp Excel với dữ liệu đã trích từ tệp tháng 11 theo thử nghiệm độc lập.
+CHƯA kiểm thử trên website/ Supabase thật của bạn. Không khẳng định toàn hệ thống không lỗi hoặc đồng bộ đa máy đã đạt thực tế.
+
+KHÔNG CẦN CHẠY SQL MỚI cho công cụ chẩn đoán.

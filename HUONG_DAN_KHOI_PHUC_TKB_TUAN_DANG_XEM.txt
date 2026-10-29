@@ -1,0 +1,29 @@
+TKB GV ĐẬM — KHÔI PHỤC TUẦN ĐANG XEM V2 (29/10/2026)
+========================================================
+Nguyên nhân có thể khiến lần trước vẫn chỉ hiện 15 tiết:
+Ứng dụng có hai ô khác nhau: "Tuần làm việc" và "TKB hiệu lực từ".
+Nếu chỉ chọn Tuần làm việc = 9, nhưng "TKB hiệu lực từ" vẫn là 1,
+bản Excel vừa tải không trở thành phiên bản hiệu lực tại tuần 9.
+
+HƯỚNG DẪN PHỤC HỒI (không xóa dữ liệu cũ):
+1. Giữ bản sao lưu thư mục VS Code hiện tại.
+2. Thay index.html, app.js và styles.css bằng ba tệp trong gói.
+3. Chạy ứng dụng, đăng nhập giáo viên, nhấn Ctrl+F5.
+4. Chọn "Tuần làm việc" = Tuần 9 (giáo viên Đậm).
+5. Bấm nút mới "KHÔI PHỤC TUẦN ĐANG XEM TỪ EXCEL" trong Kho lưu trữ.
+   - Trình duyệt tải bản sao lưu JSON của Kho TKB trước khi làm gì khác.
+   - Chọn file "TKB THÁNG 11.2026 (2.11).xlsx" trong thư mục kèm gói.
+6. Đọc kỹ hộp xác nhận: tuần 9, tên giáo viên, số tiết/ từng ngày,
+   bản đang dùng và bản Excel. Chỉ bấm OK khi thông tin đúng.
+7. Đợi thông báo đã đọc xác minh Supabase.
+8. Kiểm tra tổng 22 tiết (3 tiết thứ Hai, 5 tiết thứ Ba trong Excel nguồn)
+   và xem các thứ khác; sau đó Ctrl+F5 và kiểm tra vẫn đủ 22 tiết.
+
+QUAN TRỌNG:
+- KHÔNG dùng "TẢI/CẬP NHẬT TKB" thông thường nếu muốn khôi phục tuần 9;
+  hãy dùng nút mới để không nhầm với ô "TKB hiệu lực từ".
+- KHÔNG xóa lịch cũ. Bản mới chỉ bổ sung một phiên bản có hiệu lực từ tuần 9.
+- KHÔNG chạy lại SQL hoặc xóa bộ nhớ trình duyệt.
+- Trước khi bấm OK, phải kiểm tra đủ ngày/tiết trên hộp xác nhận.
+- Chỉ xác nhận phục hồi thực tế khi trang sau Ctrl+F5 còn đủ 22 tiết.
+- Nếu Supabase gặp lỗi, chụp nguyên thông báo, đừng nhập lại nhiều lần.

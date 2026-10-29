@@ -60,46 +60,77 @@ function activateSyncedWeek(week) {
 function markWorkingWeekChanged() {
   const userId = currentAuthUser?.id;
   if (!userId) {
-    setWeekSyncStatus("Chưa đăng nhập: tuần chỉ dùng trong phiên này. Đăng nhập để lưu và đồng bộ.", "warning");
+    setWeekSyncStatus(
+      "Chưa đăng nhập: tuần chỉ dùng trong phiên này. Đăng nhập để lưu và đồng bộ.",
+      "warning",
+    );
     return;
   }
-  const week = normalizedWorkingWeek(document.getElementById("weekSelect")?.value);
+  const week = normalizedWorkingWeek(
+    document.getElementById("weekSelect")?.value,
+  );
   weekSyncState.pendingWeek = week;
   weekSyncState.generation++;
   const key = weekSyncPendingKey(userId);
-  try { localStorage.setItem(key, String(week)); }
-  catch (err) { console.warn("[TKB] Không lưu được tuần chờ đồng bộ", err); }
+  try {
+    localStorage.setItem(key, String(week));
+  } catch (err) {
+    console.warn("[TKB] Không lưu được tuần chờ đồng bộ", err);
+  }
   setWeekSyncStatus(`Tuần ${week} · Đang lưu lên đám mây...`, "pending");
   void flushWorkingWeek();
 }
 async function flushWorkingWeek() {
   const userId = currentAuthUser?.id;
-  if (!supabaseClient || !userId || weekSyncState.sending || weekSyncState.pendingWeek === null) return;
+  if (
+    !supabaseClient ||
+    !userId ||
+    weekSyncState.sending ||
+    weekSyncState.pendingWeek === null
+  )
+    return;
   weekSyncState.sending = true;
   try {
-    while (currentAuthUser?.id === userId && weekSyncState.pendingWeek !== null) {
+    while (
+      currentAuthUser?.id === userId &&
+      weekSyncState.pendingWeek !== null
+    ) {
       const week = weekSyncState.pendingWeek;
       // Không dùng giờ máy khách: trigger SQL cập nhật updated_at bằng đồng hồ máy chủ.
-      const { error } = await supabaseClient.from("tkb_user_week_state").upsert({
-        user_id: userId,
-        school_year: TKB_SCHOOL_YEAR,
-        week_number: week,
-      }, { onConflict: "user_id,school_year" });
+      const { error } = await supabaseClient.from("tkb_user_week_state").upsert(
+        {
+          user_id: userId,
+          school_year: TKB_SCHOOL_YEAR,
+          week_number: week,
+        },
+        { onConflict: "user_id,school_year" },
+      );
       if (error) throw error;
       if (currentAuthUser?.id !== userId) break;
       // Nếu người dùng đã đổi thêm lần nữa trong khi ghi, tiếp tục ghi giá trị mới nhất.
       if (weekSyncState.pendingWeek === week) {
         weekSyncState.pendingWeek = null;
-        try { localStorage.removeItem(weekSyncPendingKey(userId)); }
-        catch (err) { console.warn("[TKB] Không xóa được hàng chờ cục bộ", err); }
-        setWeekSyncStatus(`☁️ Tuần ${week} · Đã lưu, đồng bộ các máy`, "success");
+        try {
+          localStorage.removeItem(weekSyncPendingKey(userId));
+        } catch (err) {
+          console.warn("[TKB] Không xóa được hàng chờ cục bộ", err);
+        }
+        setWeekSyncStatus(
+          `☁️ Tuần ${week} · Đã lưu, đồng bộ các máy`,
+          "success",
+        );
       }
       weekSyncState.lastError = "";
     }
   } catch (err) {
     if (currentAuthUser?.id === userId) {
       weekSyncState.lastError = err?.message || String(err);
-      setWeekSyncStatus("⚠️ Chưa đồng bộ: " + weekSyncState.lastError + " · Sẽ thử lại khi có mạng.", "error");
+      setWeekSyncStatus(
+        "⚠️ Chưa đồng bộ: " +
+          weekSyncState.lastError +
+          " · Sẽ thử lại khi có mạng.",
+        "error",
+      );
       console.warn("[TKB] Không ghi được tuần làm việc lên Supabase", err);
     }
   } finally {
@@ -108,7 +139,13 @@ async function flushWorkingWeek() {
 }
 async function pullWorkingWeek({ initializeIfMissing = false } = {}) {
   const userId = currentAuthUser?.id;
-  if (!supabaseClient || !userId || weekSyncState.polling || weekSyncState.sending) return;
+  if (
+    !supabaseClient ||
+    !userId ||
+    weekSyncState.polling ||
+    weekSyncState.sending
+  )
+    return;
   if (weekSyncState.pendingWeek !== null) {
     await flushWorkingWeek();
     if (weekSyncState.pendingWeek !== null) return; // Không ghi đè tuần vừa chọn khi đang offline.
@@ -116,28 +153,43 @@ async function pullWorkingWeek({ initializeIfMissing = false } = {}) {
   weekSyncState.polling = true;
   const initialGeneration = weekSyncState.generation;
   try {
-    const { data, error } = await supabaseClient.from("tkb_user_week_state")
+    const { data, error } = await supabaseClient
+      .from("tkb_user_week_state")
       .select("week_number,updated_at")
       .eq("user_id", userId)
       .eq("school_year", TKB_SCHOOL_YEAR)
       .maybeSingle();
     if (error) throw error;
-    if (currentAuthUser?.id !== userId || weekSyncState.generation !== initialGeneration || weekSyncState.pendingWeek !== null) return;
+    if (
+      currentAuthUser?.id !== userId ||
+      weekSyncState.generation !== initialGeneration ||
+      weekSyncState.pendingWeek !== null
+    )
+      return;
     if (data) {
       const week = normalizedWorkingWeek(data.week_number);
       activateSyncedWeek(week);
-      setWeekSyncStatus(`☁️ Tuần ${week} · Đã đồng bộ (${TKB_SCHOOL_YEAR})`, "success");
+      setWeekSyncStatus(
+        `☁️ Tuần ${week} · Đã đồng bộ (${TKB_SCHOOL_YEAR})`,
+        "success",
+      );
       weekSyncState.lastError = "";
     } else if (initializeIfMissing) {
       // Chuyển giá trị đang chọn từ bản cũ sang Supabase trong lần đăng nhập đầu tiên.
       markWorkingWeekChanged();
     } else {
-      setWeekSyncStatus("Chưa có tuần đã lưu trên đám mây. Hãy chọn tuần để đồng bộ.", "warning");
+      setWeekSyncStatus(
+        "Chưa có tuần đã lưu trên đám mây. Hãy chọn tuần để đồng bộ.",
+        "warning",
+      );
     }
   } catch (err) {
     if (currentAuthUser?.id === userId) {
       weekSyncState.lastError = err?.message || String(err);
-      setWeekSyncStatus("⚠️ Chưa đọc được tuần đồng bộ: " + weekSyncState.lastError, "error");
+      setWeekSyncStatus(
+        "⚠️ Chưa đọc được tuần đồng bộ: " + weekSyncState.lastError,
+        "error",
+      );
       console.warn("[TKB] Không đọc được tuần làm việc từ Supabase", err);
     }
   } finally {
@@ -156,7 +208,9 @@ async function startWorkingWeekSync() {
     const raw = localStorage.getItem(key);
     if (raw && /^([1-9]|[12][0-9]|3[0-5])$/.test(raw))
       weekSyncState.pendingWeek = Number(raw);
-  } catch (err) { console.warn("[TKB] Không đọc được hàng chờ tuần", err); }
+  } catch (err) {
+    console.warn("[TKB] Không đọc được hàng chờ tuần", err);
+  }
   if (weekSyncState.pendingWeek !== null) {
     activateSyncedWeek(weekSyncState.pendingWeek);
     await flushWorkingWeek();
@@ -168,12 +222,15 @@ async function startWorkingWeekSync() {
     }, TKB_WEEK_SYNC_INTERVAL_MS);
   }
 }
-window.addEventListener("focus", () => { void pullWorkingWeek(); });
+window.addEventListener("focus", () => {
+  void pullWorkingWeek();
+});
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "visible") void pullWorkingWeek();
 });
-window.addEventListener("online", () => { void pullWorkingWeek(); });
-
+window.addEventListener("online", () => {
+  void pullWorkingWeek();
+});
 
 async function ensureSupabaseSchoolYear() {
   if (!supabaseClient || !currentAuthUser)
@@ -222,62 +279,148 @@ function lessonToSupabaseRow(x, versionId, teacherName = TEACHER) {
     source_cell: clean(x.oNguon || x.sourceCell),
   };
 }
+// LƯU PHIÊN BẢN TKB AN TOÀN (V4): kiểm tra ràng buộc trên server và
+// chỉ tạo phiên bản MỚI, không ghi đè/xóa dữ liệu phiên bản trước.
+function uniqueRevisionHash(base, week) {
+  const random =
+    typeof crypto !== "undefined" && crypto.randomUUID
+      ? crypto.randomUUID().slice(0, 8)
+      : Math.random().toString(36).slice(2, 10);
+  return `${base}:w${week}:rev${Date.now().toString(36)}${random}`;
+}
+async function verifyTimetableVersionRows(versionId, expectedRows, ownerId) {
+  // PostgREST có thể giới hạn số dòng trả về; chỉ lấy tổng bằng count=exact.
+  const { count, error } = await supabaseClient
+    .from("tkb_timetable_lessons")
+    .select("id", { count: "exact", head: true })
+    .eq("timetable_version_id", versionId)
+    .eq("user_id", ownerId);
+  if (error) throw error;
+  if (Number(count) !== Number(expectedRows))
+    throw new Error(
+      `Supabase chỉ xác nhận ${count ?? "không rõ"}/${expectedRows} tiết. Bản vừa ghi chưa được xác nhận; không xóa bản cũ.`,
+    );
+}
 async function saveTimetableVersionToSupabase(version) {
-  if (!currentAuthUser)
-    throw new Error("Hãy đăng nhập giáo viên trước khi lưu TKB lên Supabase.");
+  if (!currentAuthUser || !supabaseClient)
+    throw new Error("Hãy đăng nhập Supabase trước khi lưu TKB.");
+  const userId = currentAuthUser.id;
   const schoolYearId = await ensureSupabaseSchoolYear();
-  const week = schoolCalendar.weeks.find(
-    (w) => Number(w.week) === Number(version.startWeek),
+  const week = Number(version.startWeek);
+  if (!Number.isInteger(week) || week < 1 || week > 35)
+    throw new Error("Tuần hiệu lực phải từ 1 đến 35.");
+  const calendarWeek = schoolCalendar.weeks.find(
+    (w) => Number(w.week) === week,
   );
-  const teacherEntries = Object.entries(version.lessonsByTeacher || {}).filter(
-    ([teacherName, teacherLessons]) => clean(teacherName) && Array.isArray(teacherLessons),
+  const entries = Object.entries(version.lessonsByTeacher || {}).filter(
+    ([name, rows]) => clean(name) && Array.isArray(rows),
   );
-  const allTeacherRows = teacherEntries.length
-    ? teacherEntries.flatMap(([teacherName, teacherLessons]) =>
-        teacherLessons.map((x) => lessonToSupabaseRow(x, null, teacherName)),
+  const sourceRows = entries.length
+    ? entries.flatMap(([teacherName, rows]) =>
+        rows.map((x) => lessonToSupabaseRow(x, null, teacherName)),
       )
     : (version.lessons || []).map((x) => lessonToSupabaseRow(x, null, TEACHER));
-  const payload = {
-    school_year_id: schoolYearId,
-    user_id: currentAuthUser.id,
-    teacher_name: TEACHER,
-    source_filename: version.file || "",
-    effective_week: Number(version.startWeek),
-    effective_date: week?.start || null,
-    content_hash: version.fingerprint || scheduleFingerprint(version.lessons),
-    lesson_count: allTeacherRows.length,
-  };
-  const { data, error } = await supabaseClient
-    .from("tkb_timetable_versions")
-    .insert(payload)
-    .select("id")
-    .single();
-  if (error) {
-    if (error.code === "23505")
-      throw new Error("TKB này đã tồn tại trên Supabase (trùng nội dung).");
-    throw error;
-  }
-  const rows = allTeacherRows.map((x) => ({ ...x, timetable_version_id: data.id }));
-  if (rows.length) {
-    const { error: lessonError } = await supabaseClient
-      .from("tkb_timetable_lessons")
-      .insert(rows);
-    if (lessonError) {
-      await supabaseClient
-        .from("tkb_timetable_versions")
-        .delete()
-        .eq("id", data.id);
-      throw lessonError;
+  if (!sourceRows.length)
+    throw new Error("Excel không có tiết hợp lệ; không lưu dữ liệu rỗng.");
+  if (currentAuthUser?.id !== userId)
+    throw new Error("Tài khoản vừa thay đổi; không lưu.");
+  const baseHash =
+    version.contentFingerprint || scheduleFingerprint(version.lessons);
+  let chosenHash = String(version.fingerprint || baseHash);
+  let id = null;
+  // Supabase có thể đã chứa hash dù bộ nhớ localhost chưa có phiên bản đó.
+  // Chỉ đổi hash khi xác định chắc chắn ràng buộc hash gây xung đột.
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const payload = {
+      school_year_id: schoolYearId,
+      user_id: userId,
+      teacher_name: TEACHER,
+      source_filename: version.file || "",
+      effective_week: week,
+      effective_date: calendarWeek?.start || null,
+      content_hash: chosenHash,
+      lesson_count: sourceRows.length,
+    };
+    const { data, error } = await supabaseClient
+      .from("tkb_timetable_versions")
+      .insert(payload)
+      .select("id")
+      .single();
+    if (!error) {
+      id = data?.id;
+      break;
     }
+    if (error.code !== "23505") throw error;
+    const { data: collisions, error: checkError } = await supabaseClient
+      .from("tkb_timetable_versions")
+      .select("id,effective_week,source_filename,lesson_count")
+      .eq("user_id", userId)
+      .eq("school_year_id", schoolYearId)
+      .eq("content_hash", chosenHash)
+      .limit(2);
+    if (checkError) throw checkError;
+    if (!collisions?.length)
+      throw new Error(
+        "Supabase báo trùng nhưng không phải do mã nội dung TKB. Không tạo bản trùng; cần kiểm tra ràng buộc dữ liệu trên server.",
+      );
+    // Không dùng lại bản trùng vì số tiết server có thể đã thiếu/khác.
+    // Phiên bản bổ sung được lưu bằng một mã revision riêng, nguyên bản không đổi.
+    chosenHash = uniqueRevisionHash(baseHash, week);
   }
-  version.supabaseId = data.id;
+  if (!id)
+    throw new Error(
+      "Không tạo được phiên bản TKB mới sau khi kiểm tra trùng nội dung. Chưa chỉnh sửa phiên bản cũ.",
+    );
+  if (currentAuthUser?.id !== userId) {
+    // Tránh ghi tiết dưới tài khoản khác; bản vừa tạo không được coi là hoàn tất.
+    throw new Error(
+      "Tài khoản thay đổi trong khi lưu; chưa hoàn tất phiên bản mới.",
+    );
+  }
+  try {
+    for (let i = 0; i < sourceRows.length; i += 250) {
+      const rows = sourceRows
+        .slice(i, i + 250)
+        .map((x) => ({ ...x, timetable_version_id: id }));
+      const { error } = await supabaseClient
+        .from("tkb_timetable_lessons")
+        .insert(rows);
+      if (error) throw error;
+    }
+    await verifyTimetableVersionRows(id, sourceRows.length, userId);
+  } catch (err) {
+    // Không xóa phiên bản cũ; chỉ dọn bản MỚI vừa tạo khi không hoàn chỉnh.
+    // Nếu dọn thất bại, báo rõ để quản trị viên xử lý (không im lặng).
+    const { error: lessonDeleteError } = await supabaseClient
+      .from("tkb_timetable_lessons")
+      .delete()
+      .eq("timetable_version_id", id)
+      .eq("user_id", userId);
+    if (lessonDeleteError)
+      throw new Error(
+        `Lưu bị lỗi (${err.message || err}); đồng thời chưa dọn được bản mới: ${lessonDeleteError.message}. Kho cũ không bị chỉnh sửa.`,
+      );
+    const { error: versionDeleteError } = await supabaseClient
+      .from("tkb_timetable_versions")
+      .delete()
+      .eq("id", id)
+      .eq("user_id", userId);
+    if (versionDeleteError)
+      throw new Error(
+        `Lưu bị lỗi (${err.message || err}); bản mới chưa dọn được: ${versionDeleteError.message}. Kho cũ không bị chỉnh sửa.`,
+      );
+    throw err;
+  }
+  version.fingerprint = chosenHash;
+  version.supabaseId = id;
   version.syncedToSupabase = true;
-  return data.id;
+  return id;
 }
 async function syncTimetableTeacherRowsToSupabase(version) {
   // BƯỚC 5.6.2B.9A.1: lưu THỰC SỰ toàn bộ lessonsByTeacher vào Supabase.
   // Không phụ thuộc việc phiên bản trong cache đã có supabaseId hay chưa.
-  if (!currentAuthUser || !version?.lessonsByTeacher) return { rows: 0, teachers: 0 };
+  if (!currentAuthUser || !version?.lessonsByTeacher)
+    return { rows: 0, teachers: 0 };
 
   let versionId = version.supabaseId || null;
   if (!versionId) {
@@ -287,24 +430,33 @@ async function syncTimetableTeacherRowsToSupabase(version) {
       .eq("user_id", currentAuthUser.id);
     if (version.fingerprint) q = q.eq("content_hash", version.fingerprint);
     else {
-      q = q.eq("source_filename", version.file || "")
+      q = q
+        .eq("source_filename", version.file || "")
         .eq("effective_week", Number(version.startWeek) || 1);
     }
-    const { data: found, error: findError } = await q.order("created_at", { ascending: false }).limit(1);
+    const { data: found, error: findError } = await q
+      .order("created_at", { ascending: false })
+      .limit(1);
     if (findError) throw findError;
     versionId = found?.[0]?.id || null;
     if (!versionId)
-      throw new Error("Không tìm thấy phiên bản TKB trên Supabase để cập nhật dữ liệu đa giáo viên.");
+      throw new Error(
+        "Không tìm thấy phiên bản TKB trên Supabase để cập nhật dữ liệu đa giáo viên.",
+      );
     version.supabaseId = versionId;
   }
 
   const teacherEntries = Object.entries(version.lessonsByTeacher || {}).filter(
-    ([teacherName, teacherLessons]) => clean(teacherName) && Array.isArray(teacherLessons) && teacherLessons.length,
+    ([teacherName, teacherLessons]) =>
+      clean(teacherName) &&
+      Array.isArray(teacherLessons) &&
+      teacherLessons.length,
   );
   const rows = teacherEntries.flatMap(([teacherName, teacherLessons]) =>
     teacherLessons.map((x) => lessonToSupabaseRow(x, versionId, teacherName)),
   );
-  if (!rows.length) throw new Error("Không có tiết đa giáo viên để lưu lên Supabase.");
+  if (!rows.length)
+    throw new Error("Không có tiết đa giáo viên để lưu lên Supabase.");
 
   const { error: deleteError } = await supabaseClient
     .from("tkb_timetable_lessons")
@@ -330,9 +482,15 @@ async function syncTimetableTeacherRowsToSupabase(version) {
     .eq("user_id", currentAuthUser.id)
     .not("teacher_name", "is", null);
   if (verifyError) throw verifyError;
-  const savedTeachers = [...new Set((verifyRows || []).map((r) => clean(r.teacher_name)).filter(Boolean))];
+  const savedTeachers = [
+    ...new Set(
+      (verifyRows || []).map((r) => clean(r.teacher_name)).filter(Boolean),
+    ),
+  ];
   if (!savedTeachers.length)
-    throw new Error("Supabase chưa ghi được teacher_name. Dữ liệu đa giáo viên chưa được lưu.");
+    throw new Error(
+      "Supabase chưa ghi được teacher_name. Dữ liệu đa giáo viên chưa được lưu.",
+    );
 
   const { error: versionError } = await supabaseClient
     .from("tkb_timetable_versions")
@@ -653,9 +811,12 @@ function teacherTeachingScope() {
 function appendixSubjectMatchesScope(subject, grade, scope) {
   const g = Number(grade);
   const aliases = subjectAliasKeys(subject);
-  return scope.some((item) => Number(item.grade) === g &&
-    ((isHDTNSubject(subject) && isHDTNSubject(item.subject)) ||
-      [...aliases].some((k) => item.aliases.has(k))));
+  return scope.some(
+    (item) =>
+      Number(item.grade) === g &&
+      ((isHDTNSubject(subject) && isHDTNSubject(item.subject)) ||
+        [...aliases].some((k) => item.aliases.has(k))),
+  );
 }
 async function autoLoadAppendix2ForSelectedTeacher() {
   if (!supabaseClient || !currentAuthUser) {
@@ -688,7 +849,8 @@ async function autoLoadAppendix2ForSelectedTeacher() {
       for (const row of rows || []) {
         scope.forEach((item, i) => {
           if (Number(item.grade) !== Number(row.grade)) return;
-          if (appendixSubjectMatchesScope(row.subject_name, row.grade, [item])) covered.add(i);
+          if (appendixSubjectMatchesScope(row.subject_name, row.grade, [item]))
+            covered.add(i);
         });
       }
       const score = covered.size;
@@ -722,7 +884,9 @@ async function autoLoadAppendix2ForSelectedTeacher() {
 function curriculumBaseSubject(code) {
   // Không cắt số 1/2/3 khỏi mã mạch Hoạt động trải nghiệm.
   if (hdtntypeFromLabel(code)) return normalizeSubjectForPlan(code);
-  return clean(code).replace(/\s+(?:\d+|[A-Z])$/iu, "").trim();
+  return clean(code)
+    .replace(/\s+(?:\d+|[A-Z])$/iu, "")
+    .trim();
 }
 // BƯỚC 5.6.2B.3A - So khớp môn CHẶT cho kho PPCT chung.
 // Không dùng initials/noConnectors của subjectAliasKeys vì các khóa 1 ký tự
@@ -730,27 +894,56 @@ function curriculumBaseSubject(code) {
 function curriculumSubjectKey(value) {
   const compact = normKey(clean(value)).replace(/[^a-z0-9]+/g, "");
   const aliases = {
-    th: "tinhoc", tinhoc: "tinhoc",
-    cn: "congnghe", cnghe: "congnghe", congnghe: "congnghe",
-    dd: "daoduc", daoduc: "daoduc",
-    tv: "tiengviet", tviet: "tiengviet", tiengviet: "tiengviet",
-    tnxh: "tnxh", tnvxh: "tnxh", tunhienxahoi: "tnxh", tunhienvaxahoi: "tnxh",
-    lsdl: "lsdl", lsvdl: "lsdl", lichsudialy: "lsdl", lichsuvadialy: "lsdl",
-    mt: "mythuat", mythuat: "mythuat", mithuat: "mythuat",
-    an: "amnhac", amnhac: "amnhac",
-    td: "gdtc", gdtc: "gdtc", theduc: "gdtc", giaoducthechat: "gdtc",
-    toan: "toan", khoahoc: "khoahoc",
-    tienganh: "tienganh", av: "tienganh",
-    ltt: "ltt", lttv: "lttv",
+    th: "tinhoc",
+    tinhoc: "tinhoc",
+    cn: "congnghe",
+    cnghe: "congnghe",
+    congnghe: "congnghe",
+    dd: "daoduc",
+    daoduc: "daoduc",
+    tv: "tiengviet",
+    tviet: "tiengviet",
+    tiengviet: "tiengviet",
+    tnxh: "tnxh",
+    tnvxh: "tnxh",
+    tunhienxahoi: "tnxh",
+    tunhienvaxahoi: "tnxh",
+    lsdl: "lsdl",
+    lsvdl: "lsdl",
+    lichsudialy: "lsdl",
+    lichsuvadialy: "lsdl",
+    mt: "mythuat",
+    mythuat: "mythuat",
+    mithuat: "mythuat",
+    an: "amnhac",
+    amnhac: "amnhac",
+    td: "gdtc",
+    gdtc: "gdtc",
+    theduc: "gdtc",
+    giaoducthechat: "gdtc",
+    toan: "toan",
+    khoahoc: "khoahoc",
+    tienganh: "tienganh",
+    av: "tienganh",
+    ltt: "ltt",
+    lttv: "lttv",
     // Hoạt động trải nghiệm trong kho PPCT được tách thành 3 mạch:
     // HĐGDCĐ (Hoạt động giáo dục theo chủ đề), SHDC, SHL.
     // HĐTN chung KHÔNG đủ để đoán loại tiết; chỉ các tên cụ thể mới được ghép.
-    hdtn: "hdtn", hoatdongtrainghiem: "hdtn",
-    hdtn1: "shdc", hoatdongtrainghiem1: "shdc",
-    hdtn2: "hdgdcd", hoatdongtrainghiem2: "hdgdcd", hdgdcd: "hdgdcd",
-    hdtn3: "shl", hoatdongtrainghiem3: "shl",
-    shdc: "shdc", sinhhoatduoico: "shdc",
-    shl: "shl", shlop: "shl", sinhhoatlop: "shl",
+    hdtn: "hdtn",
+    hoatdongtrainghiem: "hdtn",
+    hdtn1: "shdc",
+    hoatdongtrainghiem1: "shdc",
+    hdtn2: "hdgdcd",
+    hoatdongtrainghiem2: "hdgdcd",
+    hdgdcd: "hdgdcd",
+    hdtn3: "shl",
+    hoatdongtrainghiem3: "shl",
+    shdc: "shdc",
+    sinhhoatduoico: "shdc",
+    shl: "shl",
+    shlop: "shl",
+    sinhhoatlop: "shl",
   };
   return aliases[compact] || compact;
 }
@@ -766,7 +959,9 @@ async function sharedCurriculumPreviewData() {
   const source = filterSchedule();
   if (!source.length) return [];
   if (!supabaseClient) throw new Error("Supabase chưa sẵn sàng.");
-  const grades = [...new Set(source.map((x) => gradeFromClass(x.lop)).filter(Boolean))];
+  const grades = [
+    ...new Set(source.map((x) => gradeFromClass(x.lop)).filter(Boolean)),
+  ];
   let q = supabaseClient
     .from("tkb_curriculum")
     .select("week,ppct,subject_code,grade,lesson_name,stem")
@@ -779,45 +974,55 @@ async function sharedCurriculumPreviewData() {
   if (error) throw error;
   const rows = data || [];
   const edits = loadOutputEdits();
-  return source.map((x) => {
-    const e = edits[outputLessonId(x)];
-    if (e?.deleted) return null;
-    const y = { ...x };
-    if (e?.monHoc !== undefined) y.monHoc = e.monHoc;
-    if (e?.lop !== undefined) y.lop = e.lop;
-    const grade = gradeFromClass(y.lop);
-    const hit = rows.find(
-      (r) => Number(r.grade) === Number(grade) && curriculumSubjectMatches(appendixSubjectForTimetableLesson(y), r.subject_code),
-    );
-    const curriculumPlan = hit
-      ? {
-          subject: curriculumBaseSubject(hit.subject_code),
-          grade,
+  return source
+    .map((x) => {
+      const e = edits[outputLessonId(x)];
+      if (e?.deleted) return null;
+      const y = { ...x };
+      if (e?.monHoc !== undefined) y.monHoc = e.monHoc;
+      if (e?.lop !== undefined) y.lop = e.lop;
+      const grade = gradeFromClass(y.lop);
+      const hit = rows.find(
+        (r) =>
+          Number(r.grade) === Number(grade) &&
+          curriculumSubjectMatches(
+            appendixSubjectForTimetableLesson(y),
+            r.subject_code,
+          ),
+      );
+      const curriculumPlan = hit
+        ? {
+            subject: curriculumBaseSubject(hit.subject_code),
+            grade,
+            week,
+            annualPeriod: hit.ppct ?? "",
+            title: clean(hit.lesson_name),
+            duration: "",
+            integration: clean(hit.stem),
+            note: "",
+            source: "Kho PPCT chung",
+          }
+        : null;
+      // Điều chỉnh thủ công trong Xem trước vẫn có quyền ưu tiên cao nhất.
+      if (e?.title !== undefined) {
+        y.plan = {
+          ...(curriculumPlan || {}),
+          title: e.title,
+          annualPeriod:
+            e.annualPeriod !== undefined
+              ? e.annualPeriod
+              : curriculumPlan?.annualPeriod || "",
           week,
-          annualPeriod: hit.ppct ?? "",
-          title: clean(hit.lesson_name),
-          duration: "",
-          integration: clean(hit.stem),
-          note: "",
-          source: "Kho PPCT chung",
-        }
-      : null;
-    // Điều chỉnh thủ công trong Xem trước vẫn có quyền ưu tiên cao nhất.
-    if (e?.title !== undefined) {
-      y.plan = {
-        ...(curriculumPlan || {}),
-        title: e.title,
-        annualPeriod: e.annualPeriod !== undefined ? e.annualPeriod : curriculumPlan?.annualPeriod || "",
-        week,
-        subject: normalizeSubjectForPlan(y.monHoc),
-        grade,
-      };
-    } else y.plan = curriculumPlan;
-    y.planWeek = week;
-    y.planSubject = normalizeSubjectForPlan(y.monHoc);
-    y.planGrade = grade;
-    return y;
-  }).filter(Boolean);
+          subject: normalizeSubjectForPlan(y.monHoc),
+          grade,
+        };
+      } else y.plan = curriculumPlan;
+      y.planWeek = week;
+      y.planSubject = normalizeSubjectForPlan(y.monHoc);
+      y.planGrade = grade;
+      return y;
+    })
+    .filter(Boolean);
 }
 
 async function probeSharedCurriculum() {
@@ -834,7 +1039,9 @@ async function probeSharedCurriculum() {
     status.textContent = `Giáo viên ${selectedTeacher} chưa có tiết trong TKB Tuần ${week}.`;
     return;
   }
-  const grades = [...new Set(scope.map((x) => Number(x.grade)).filter(Boolean))];
+  const grades = [
+    ...new Set(scope.map((x) => Number(x.grade)).filter(Boolean)),
+  ];
   btn.disabled = true;
   status.textContent = `Đang đọc thử tKB_curriculum · ${selectedTeacher} · Tuần ${week}...`;
   try {
@@ -851,7 +1058,9 @@ async function probeSharedCurriculum() {
     const rows = data || [];
     const results = scope.map((item) => {
       const hits = rows.filter(
-        (r) => Number(r.grade) === Number(item.grade) && curriculumSubjectMatches(item.subject, r.subject_code),
+        (r) =>
+          Number(r.grade) === Number(item.grade) &&
+          curriculumSubjectMatches(item.subject, r.subject_code),
       );
       return { item, hits };
     });
@@ -979,12 +1188,13 @@ function restoredVersionMeta(version, lessons) {
     effectiveDate: version.effective_date || null,
   };
 }
-async function restoreScheduleRepositoryFromSupabase() {
+async function restoreScheduleRepositoryFromSupabase({
+  readOnly = false,
+} = {}) {
   if (!supabaseClient || !currentAuthUser) return { versions: 0, lessons: 0 };
   // BƯỚC 5.6.2B.9E.1A: giữ snapshot cache của đúng tài khoản trước khi tải Supabase.
   // Khi đóng trình duyệt/mở lại, cache này có thể chứa bản đa giáo viên mới hơn
   // (ví dụ C Hiếu 18 tiết) trong khi Supabase vẫn còn bản cũ chỉ 2 tiết.
-  const localBeforeRestore = scheduleVersions.map((v) => ({ ...v }));
   const schoolYearId = await ensureSupabaseSchoolYear();
   const { data: versions, error: vErr } = await supabaseClient
     .from("tkb_timetable_versions")
@@ -1019,7 +1229,8 @@ async function restoreScheduleRepositoryFromSupabase() {
   const byVersion = new Map();
   const byVersionTeacher = new Map();
   (rows || []).forEach((r) => {
-    if (!byVersion.has(r.timetable_version_id)) byVersion.set(r.timetable_version_id, []);
+    if (!byVersion.has(r.timetable_version_id))
+      byVersion.set(r.timetable_version_id, []);
     const appRow = supabaseLessonToAppRow(r);
     // BƯỚC 5.6.2B.9E.1: TKB nguồn mới của trường chỉ có Tiết 1–7.
     // Không khôi phục các dòng Tiết > 7 còn sót từ parser/phiên cũ trên Supabase.
@@ -1028,7 +1239,8 @@ async function restoreScheduleRepositoryFromSupabase() {
     const teacherName = clean(r.teacher_name) || TEACHER;
     if (normalizeTeacherName(teacherName) === normalizeTeacherName(TEACHER))
       byVersion.get(r.timetable_version_id).push(appRow);
-    if (!byVersionTeacher.has(r.timetable_version_id)) byVersionTeacher.set(r.timetable_version_id, {});
+    if (!byVersionTeacher.has(r.timetable_version_id))
+      byVersionTeacher.set(r.timetable_version_id, {});
     const teacherMap = byVersionTeacher.get(r.timetable_version_id);
     if (!teacherMap[teacherName]) teacherMap[teacherName] = [];
     teacherMap[teacherName].push(appRow);
@@ -1036,54 +1248,22 @@ async function restoreScheduleRepositoryFromSupabase() {
   const restored = versions
     .map((v) => {
       const teacherMap = byVersionTeacher.get(v.id) || {};
-      const fallback = byVersion.get(v.id) || Object.values(teacherMap)[0] || [];
+      const fallback =
+        byVersion.get(v.id) || Object.values(teacherMap)[0] || [];
       const item = restoredVersionMeta(v, fallback);
       item.lessonsByTeacher = teacherMap;
       item.teachers = Object.keys(teacherMap);
       return item;
     })
-    .filter((v) => v.lessons.length || Object.keys(v.lessonsByTeacher || {}).length);
-
-  // Nếu cache cục bộ có cùng phiên bản nhưng dữ liệu đa giáo viên đầy đủ hơn Supabase,
-  // ưu tiên cache đó và tự đồng bộ ngược lên Supabase. Đây là điểm khác biệt giữa F5
-  // (RAM/cache còn đúng) và đóng trình duyệt rồi mở lại (trước đây Supabase cũ ghi đè cache).
-  const rowsInTeacherMap = (map) =>
-    Object.values(map || {}).reduce(
-      (n, arr) => n + (Array.isArray(arr) ? arr.filter((x) => Number(x?.tiet) <= 7).length : 0),
-      0,
+    .filter(
+      (v) => v.lessons.length || Object.keys(v.lessonsByTeacher || {}).length,
     );
-  const sanitizeTeacherMap = (map) => {
-    const out = {};
-    Object.entries(map || {}).forEach(([teacherName, teacherLessons]) => {
-      if (!Array.isArray(teacherLessons)) return;
-      out[teacherName] = sortSchedule(teacherLessons.filter((x) => Number(x?.tiet) <= 7));
-    });
-    return out;
-  };
-  const versionsToHeal = [];
-  restored.forEach((item) => {
-    const local = localBeforeRestore.find(
-      (x) =>
-        (x.supabaseId && String(x.supabaseId) === String(item.supabaseId)) ||
-        (x.fingerprint && item.fingerprint &&
-          x.fingerprint === item.fingerprint &&
-          Number(x.startWeek) === Number(item.startWeek)),
-    );
-    if (!local?.lessonsByTeacher) return;
-    const localMap = sanitizeTeacherMap(local.lessonsByTeacher);
-    const remoteMap = sanitizeTeacherMap(item.lessonsByTeacher);
-    if (rowsInTeacherMap(localMap) <= rowsInTeacherMap(remoteMap)) return;
 
-    item.lessonsByTeacher = localMap;
-    item.teachers = Object.keys(localMap);
-    const selectedKey = Object.keys(localMap).find(
-      (k) => normalizeTeacherName(k) === normalizeTeacherName(TEACHER),
-    );
-    item.lessons = selectedKey ? localMap[selectedKey] : Object.values(localMap)[0] || [];
-    versionsToHeal.push(item);
-  });
-
-  const restoredTeachers = [...new Set(restored.flatMap((v) => v.teachers || []))];
+  // V4: Supabase là nguồn chuẩn sau đăng nhập. Không được lấy kho cục bộ
+  // đè lên dữ liệu từ server và tự ghi dữ liệu cũ trở lại.
+  const restoredTeachers = [
+    ...new Set(restored.flatMap((v) => v.teachers || [])),
+  ];
   if (restoredTeachers.length) updateTeacherSelector(restoredTeachers);
   // Supabase là nguồn lâu dài sau khi đăng nhập; localStorage được cập nhật lại làm bản dự phòng.
   scheduleVersions.splice(0, scheduleVersions.length, ...restored);
@@ -1096,23 +1276,17 @@ async function restoreScheduleRepositoryFromSupabase() {
   );
   saveScheduleRepository();
 
-  // Tự chữa kho Supabase bằng bản cache đầy đủ hơn. Nếu mạng tạm lỗi vẫn giữ cache đúng
-  // để người dùng làm việc; lần mở sau có thể đồng bộ lại.
-  for (const version of versionsToHeal) {
-    try {
-      await syncTimetableTeacherRowsToSupabase(version);
-    } catch (healErr) {
-      console.warn("[TKB] Chưa đồng bộ ngược được bản đa giáo viên đầy đủ lên Supabase", healErr);
-    }
-  }
-
+  // V4: Không tự động ghi/xóa bất kỳ bản ghi Supabase nào khi tải lại kho.
   activateSelectedWeek();
   // BƯỚC 5.6.2B.9E.1: sau F5 phải sẵn sàng đúng dữ liệu của GV đang chọn,
   // không yêu cầu tải lại Excel mới làm mới phạm vi môn/kế hoạch.
   try {
     await autoLoadAppendix2ForSelectedTeacher();
   } catch (autoErr) {
-    console.warn("[TKB] Khôi phục TKB đã xong nhưng chưa tự nạp được kế hoạch theo giáo viên", autoErr);
+    console.warn(
+      "[TKB] Khôi phục TKB đã xong nhưng chưa tự nạp được kế hoạch theo giáo viên",
+      autoErr,
+    );
   }
   const total = restored.reduce((n, v) => n + v.lessons.length, 0);
   const status = $("supabaseStatus");
@@ -1511,6 +1685,193 @@ function modalShell(title, body) {
   };
   return m;
 }
+// CHẨN ĐOÁN DỮ LIỆU TKB – CHỈ ĐỌC. KHÔNG xóa/lưu phiên bản Supabase.
+// Công cụ phân biệt kho trên localhost/file:// và website trực tuyến.
+async function readScheduleSourceDiagnostic() {
+  const week = Number($("weekSelect")?.value || 1);
+  const localVersion = effectiveScheduleForWeek(week);
+  const localRows = lessonsForSelectedTeacher(localVersion);
+  const daySummary = (arr) => {
+    const d = {};
+    (arr || []).forEach((x) => {
+      const k = clean(x.thu);
+      if (k) d[k] = (d[k] || 0) + 1;
+    });
+    return (
+      Object.entries(d)
+        .map(([k, n]) => `${k}: ${n}`)
+        .join(" · ") || "Không có tiết"
+    );
+  };
+  const report = {
+    origin:
+      location.origin === "null" ? "file:// (mở trực tiếp)" : location.origin,
+    week,
+    teacher: selectedTeacher,
+    loggedIn: !!currentAuthUser,
+    email: currentAuthUser?.email || "",
+    local: {
+      count: localRows.length,
+      source: localVersion?.file || "Không có phiên bản",
+      versionWeek: localVersion?.startWeek || null,
+      days: daySummary(localRows),
+      id: localVersion?.supabaseId || null,
+    },
+    remote: null,
+    error: null,
+  };
+  if (!supabaseClient) {
+    report.error = "Chưa kết nối được thư viện Supabase ở địa chỉ này.";
+    return report;
+  }
+  if (!currentAuthUser) {
+    report.error =
+      "Chưa đăng nhập Supabase trên địa chỉ này. localStorage của website và VS Code KHÔNG dùng chung.";
+    return report;
+  }
+  try {
+    let yearId = currentSchoolYearId;
+    if (!yearId) {
+      // Chỉ SELECT năm học; không tự INSERT như ensureSupabaseSchoolYear().
+      const { data: years, error: yError } = await supabaseClient
+        .from("tkb_school_years")
+        .select("id")
+        .eq("user_id", currentAuthUser.id)
+        .eq("school_year", TKB_SCHOOL_YEAR)
+        .limit(1);
+      if (yError) throw yError;
+      yearId = years?.[0]?.id || null;
+      if (!yearId)
+        throw new Error(
+          "Không thấy năm học " +
+            TKB_SCHOOL_YEAR +
+            " trong Supabase của tài khoản này.",
+        );
+    }
+    let q = supabaseClient
+      .from("tkb_timetable_versions")
+      .select(
+        "id,source_filename,effective_week,created_at,school_year_id,lesson_count",
+      )
+      .eq("user_id", currentAuthUser.id)
+      .eq("school_year_id", yearId);
+    const { data: versions, error: vError } = await q.order("created_at", {
+      ascending: false,
+    });
+    if (vError) throw vError;
+    const usable = (versions || []).filter(
+      (v) => Number(v.effective_week) <= week,
+    );
+    usable.sort(
+      (a, b) =>
+        Number(b.effective_week) - Number(a.effective_week) ||
+        String(b.created_at || "").localeCompare(String(a.created_at || "")),
+    );
+    const v = usable[0];
+    if (!v) {
+      report.remote = {
+        count: 0,
+        source: "Không có phiên bản trong tuần",
+        days: "Không có tiết",
+        id: null,
+      };
+      return report;
+    }
+    const { data: rows, error: lError } = await supabaseClient
+      .from("tkb_timetable_lessons")
+      .select("teacher_name,thu,tiet,mon_hoc")
+      .eq("user_id", currentAuthUser.id)
+      .eq("timetable_version_id", v.id);
+    if (lError) throw lError;
+    const teacherRows = (rows || []).filter(
+      (x) =>
+        normalizeTeacherName(x.teacher_name) ===
+          normalizeTeacherName(selectedTeacher) && Number(x.tiet) <= 7,
+    );
+    report.remote = {
+      count: teacherRows.length,
+      source: v.source_filename || "",
+      versionWeek: v.effective_week,
+      days: daySummary(teacherRows),
+      id: v.id,
+      allTeachersCount: (rows || []).length,
+    };
+  } catch (err) {
+    report.error =
+      "Không đọc được kho Supabase: " + (err?.message || String(err));
+  }
+  return report;
+}
+async function openScheduleSourceDiagnostic() {
+  const m = modalShell(
+    "ĐỐI CHIẾU KHO TKB – KHÔNG THAY ĐỔI DỮ LIỆU",
+    `
+    <p class="manage-note">Đây là công cụ chỉ đọc để so sánh bản chạy trong VS Code và website thật. Hãy mở công cụ này trên cả hai địa chỉ, cùng giáo viên và tuần.</p>
+    <div id="tkbDiagResult" class="tkb-diag-result">Đang kiểm tra nguồn dữ liệu...</div>
+    <div class="manage-actions"><button id="tkbDiagAgain" type="button">↻ KIỂM TRA LẠI</button><button id="tkbDiagReload" type="button" disabled>↻ NẠP LẠI TỪ SUPABASE</button></div>
+    <p class="manage-note">Không bấm Xóa phiên bản hoặc nhập lại Excel cho đến khi biết kho nào đang có đủ tiết.</p>`,
+  );
+  const box = m.querySelector("#tkbDiagResult");
+  const reload = m.querySelector("#tkbDiagReload");
+  async function show() {
+    reload.disabled = true;
+    box.textContent = "Đang đối chiếu kho máy này và kho Supabase...";
+    const r = await readScheduleSourceDiagnostic();
+    const info = (x) =>
+      `<b>${x.count} tiết</b> · ${esc(x.source)} · hiệu lực tuần ${esc(x.versionWeek ?? "—")}<div class="tkb-diag-muted">${esc(x.days)}</div>`;
+    box.innerHTML = `<div><b>Địa chỉ đang mở:</b> ${esc(r.origin)}</div>
+      <div><b>Tài khoản:</b> ${r.loggedIn ? "Đã đăng nhập: " + esc(r.email) : "CHƯA ĐĂNG NHẬP"}</div>
+      <div><b>Đang xem:</b> Tuần ${r.week} · Giáo viên ${esc(r.teacher)}</div>
+      <div class="tkb-diag-panel"><b>Kho được máy này đang hiển thị:</b><div>${info(r.local)}</div></div>
+      ${r.remote ? `<div class="tkb-diag-panel"><b>Kho Supabase (đọc trực tiếp):</b><div>${info(r.remote)}</div></div>` : ""}
+      ${r.error ? `<p class="tkb-diag-error">⚠ ${esc(r.error)}</p>` : ""}`;
+    if (r.remote) {
+      if (r.remote.count > r.local.count) {
+        box.innerHTML += `<p class="tkb-diag-success">✓ Supabase có nhiều tiết hơn bản máy này. Có thể nạp lại mà không sửa dữ liệu trên server.</p>`;
+        reload.disabled = false;
+      } else if (r.remote.count < r.local.count) {
+        box.innerHTML += `<p class="tkb-diag-error">⚠ Bản máy này có nhiều tiết hơn Supabase. Không nạp đè, hãy sao lưu và đối chiếu trước.</p>`;
+      } else if (r.remote.id !== r.local.id) {
+        box.innerHTML += `<p>Hai kho có cùng số tiết nhưng đang dùng phiên bản khác nhau. Cần so sánh cả tên bài và ngày.</p>`;
+      } else
+        box.innerHTML += `<p class="tkb-diag-success">✓ Cùng số tiết và cùng phiên bản. Nếu web khác máy này, hãy kiểm tra tài khoản và địa chỉ web.</p>`;
+    }
+  }
+  m.querySelector("#tkbDiagAgain").onclick = show;
+  reload.onclick = async () => {
+    const before = await readScheduleSourceDiagnostic();
+    if (!before.remote || before.remote.count <= before.local.count) {
+      alert(
+        "Không đủ cơ sở nạp lại: Supabase chưa có nhiều tiết hơn kho máy này.",
+      );
+      return;
+    }
+    if (
+      !confirm(
+        `Tuần ${before.week}: Supabase có ${before.remote.count} tiết; máy này có ${before.local.count} tiết.\n\nSao lưu kho hiện tại và nạp lại kho từ Supabase? Không ghi dữ liệu lên Supabase.`,
+      )
+    )
+      return;
+    if (!scheduleRecoveryBackup()) return;
+    reload.disabled = true;
+    try {
+      await restoreScheduleRepositoryFromSupabase({ readOnly: true });
+      const after = await readScheduleSourceDiagnostic();
+      if (after.local.count !== before.remote.count)
+        throw new Error(
+          `Sau tải lại vẫn chỉ có ${after.local.count}/${before.remote.count} tiết. Vui lòng giữ bản sao lưu và chụp bảng chẩn đoán.`,
+        );
+      await show();
+      alert(
+        `Đã nạp lại ${after.local.count} tiết từ Supabase (chỉ đọc) cho Tuần ${after.week}. Hãy Ctrl+F5 và kiểm tra lại.`,
+      );
+    } catch (err) {
+      await show();
+      alert("Chưa xác nhận nạp lại thành công: " + (err?.message || err));
+    }
+  };
+  await show();
+}
 function openRepoManager() {
   const rows = scheduleVersions
     .map(
@@ -1520,19 +1881,20 @@ function openRepoManager() {
     .join("");
   const m = modalShell(
     "QUẢN LÝ KHO THỜI KHÓA BIỂU",
-    `<p class="manage-note">Có thể điều chỉnh thủ công tuần bắt đầu hiệu lực. Chỉ xóa phiên bản TKB khi chắc chắn không còn cần dùng.</p><div class="manage-scroll"><table class="manage-table"><thead><tr><th>TT</th><th>File TKB</th><th>Hiệu lực từ</th><th>Thời điểm lưu</th><th>Số tiết</th><th>Thao tác</th></tr></thead><tbody>${rows || '<tr><td colspan="6">Kho TKB đang trống.</td></tr>'}</tbody></table></div><div class="manage-actions"><button id="saveRepoEffect">LƯU HIỆU LỰC</button></div>`,
+    `<p class="manage-note"><b>KHÔI PHỤC AN TOÀN:</b> Muốn bổ sung TKB từng xóa nhầm, hãy đóng cửa sổ này, chọn <b>Tuần hiệu lực</b> tương ứng rồi tải lại file Excel gốc. TKB mới được lưu song song, không xóa bản cũ.</p><div class="manage-scroll"><table class="manage-table"><thead><tr><th>TT</th><th>File TKB</th><th>Hiệu lực từ</th><th>Thời điểm lưu</th><th>Số tiết</th><th>Thao tác</th></tr></thead><tbody>${rows || '<tr><td colspan="6">Kho TKB đang trống.</td></tr>'}</tbody></table></div><div class="manage-actions"><button id="backupRepo" type="button" class="secondary-action">⬇ SAO LƯU TOÀN BỘ KHO TKB</button><button id="saveRepoEffect">LƯU HIỆU LỰC</button></div>`,
   );
+  m.querySelector("#backupRepo").onclick = scheduleRecoveryBackup;
   m.querySelectorAll("[data-delete-repo]").forEach(
     (btn) =>
       (btn.onclick = async () => {
         const v = scheduleVersions[Number(btn.dataset.deleteRepo)];
         if (!v) return;
-        if (
-          !confirm(
-            `Xóa phiên bản TKB "${v.file}" hiệu lực từ Tuần ${v.startWeek}?\n\nDữ liệu TKB này sẽ bị xóa khỏi Supabase. Các phiên bản khác không bị ảnh hưởng.`,
-          )
-        )
-          return;
+        if (!scheduleRecoveryBackup()) return;
+        const text = prompt(
+          `Ứng dụng vừa tạo file sao lưu Kho TKB.\n\nBạn chuẩn bị XÓA VĨNH VIỄN phiên bản "${v.file}" (Tuần ${v.startWeek}) trên Supabase.\n\nChỉ tiếp tục sau khi đã giữ file sao lưu. Gõ đúng XOA để xác nhận:`,
+          "",
+        );
+        if (text !== "XOA") return;
         try {
           btn.disabled = true;
           btn.textContent = "ĐANG XÓA...";
@@ -1745,9 +2107,64 @@ function loadScheduleRepository() {
     console.warn("Không đọc được cache Kho TKB", e);
   }
 }
-function findDuplicateSchedule(fingerprint) {
-  return scheduleVersions.find((v) => v.fingerprint === fingerprint) || null;
+// Chỉ coi là trùng nếu CÙNG TUẦN HIỆU LỰC và trùng đầy đủ danh sách tiết.
+// Trước đây kiểm tra hash toàn cục khiến nhập lại một TKB cho tuần đã mất bị chặn.
+function findDuplicateSchedule(fingerprint, startWeek) {
+  return (
+    scheduleVersions.find(
+      (v) =>
+        Number(v.startWeek) === Number(startWeek) &&
+        Array.isArray(v.lessons) &&
+        scheduleFingerprint(v.lessons) === fingerprint,
+    ) || null
+  );
 }
+// Cho phép cùng một nội dung TKB tồn tại ở các mốc tuần khác nhau; các phiên bản
+// được lưu với content_hash khác nhau để không đụng ràng buộc UNIQUE Supabase.
+function safeVersionFingerprint(fingerprint, week) {
+  const used = new Set(
+    scheduleVersions.map((v) => String(v.fingerprint || "")),
+  );
+  if (!used.has(fingerprint)) return fingerprint;
+  let n = 1,
+    candidate;
+  do {
+    candidate = `${fingerprint}:week-${week}:copy-${n++}`;
+  } while (used.has(candidate));
+  return candidate;
+}
+function namedDayCounts(lessons) {
+  const out = { Hai: 0, Ba: 0, Tư: 0, Năm: 0, Sáu: 0 };
+  for (const x of lessons || []) if (Object.hasOwn(out, x.thu)) out[x.thu]++;
+  return out;
+}
+function scheduleRecoveryBackup() {
+  if (!currentAuthUser) {
+    alert("Hãy đăng nhập đúng tài khoản trước khi sao lưu Kho TKB.");
+    return false;
+  }
+  const payload = {
+    kind: "TKB_GV_DAM_BACKUP",
+    schema: 1,
+    schoolYear: TKB_SCHOOL_YEAR,
+    userId: currentAuthUser.id,
+    createdAt: new Date().toISOString(),
+    versions: scheduleVersions,
+  };
+  const blob = new Blob([JSON.stringify(payload, null, 2)], {
+    type: "application/json;charset=utf-8",
+  });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `SAO_LUU_KHO_TKB_${TKB_SCHOOL_YEAR}_${new Date().toISOString().slice(0, 10)}.json`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 60000);
+  return true;
+}
+
 function repositorySummary() {
   if (!scheduleVersions.length) return "chưa có dữ liệu";
   return scheduleVersions
@@ -1776,7 +2193,9 @@ function teacherNamesFromCell(s, knownTeachers = []) {
     const k = normKey(name);
     if (!name || !/[A-Za-zÀ-ỹĐđ]/u.test(name)) return;
     if (/^tiet\s*\d+$/u.test(k) || /^(on|tiet|buoi|lan)\b/u.test(k)) return;
-    if (!out.some((x) => normalizeTeacherName(x) === normalizeTeacherName(name)))
+    if (
+      !out.some((x) => normalizeTeacherName(x) === normalizeTeacherName(name))
+    )
       out.push(name);
   };
 
@@ -1841,13 +2260,17 @@ function extractTeacherExpectedCounts(wb, sheets) {
 
   for (const sn of sheets) {
     const rows = XLSX.utils.sheet_to_json(wb.Sheets[sn], {
-      header: 1, defval: "", raw: false,
+      header: 1,
+      defval: "",
+      raw: false,
     });
     const marker = rows.findIndex((row) => normKey(row?.[0]) === "gvcn");
     if (marker < 0) continue;
 
     const markerRow = rows[marker] || [];
-    const totalCol = markerRow.findIndex((v, i) => i > 0 && normKey(v) === "cong");
+    const totalCol = markerRow.findIndex(
+      (v, i) => i > 0 && normKey(v) === "cong",
+    );
     if (totalCol < 0) continue;
 
     bySheet[sn] = {};
@@ -1895,10 +2318,14 @@ function extractSubject(s, assignedTeachers = []) {
   // Chịu lỗi các ô như "AV Nghĩa" hoặc "TNXH Băng)": nếu cuối ô là tên GV đã nhận diện, bỏ tên đó khỏi môn.
   for (const teacher of assignedTeachers || []) {
     const parts = clean(teacher).split(/\s+/u).filter(Boolean);
-    const variants = [clean(teacher), parts[parts.length - 1] || ""].filter(Boolean);
+    const variants = [clean(teacher), parts[parts.length - 1] || ""].filter(
+      Boolean,
+    );
     for (const v of variants) {
       const escaped = v.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-      out = out.replace(new RegExp(`\\s*\\(?\\s*${escaped}\\s*\\)?\\s*$`, "iu"), "").trim();
+      out = out
+        .replace(new RegExp(`\\s*\\(?\\s*${escaped}\\s*\\)?\\s*$`, "iu"), "")
+        .trim();
     }
   }
   return clean(out);
@@ -2117,7 +2544,12 @@ function colLetter(n) {
     s = String.fromCharCode(65 + ((n - 1) % 26)) + s;
   return s;
 }
-function extractTeacherLessons(sheetName, ws, teacherName = selectedTeacher, knownTeachers = []) {
+function extractTeacherLessons(
+  sheetName,
+  ws,
+  teacherName = selectedTeacher,
+  knownTeachers = [],
+) {
   let rows = XLSX.utils.sheet_to_json(ws, {
     header: 1,
     defval: "",
@@ -2243,13 +2675,15 @@ function sortSchedule(a) {
 }
 function filterSchedule() {
   return sortSchedule(
-    allLessons.filter((x) => isValidOutputSubject(x?.monHoc)).filter(
-      (x) =>
-        (!$("fThu").value || x.thu === $("fThu").value) &&
-        (!$("fBuoi").value || clean(x.buoi) === $("fBuoi").value) &&
-        (!$("fPoint").value || x.diemTruong === $("fPoint").value) &&
-        (!$("fClass").value || x.lop === $("fClass").value),
-    ),
+    allLessons
+      .filter((x) => isValidOutputSubject(x?.monHoc))
+      .filter(
+        (x) =>
+          (!$("fThu").value || x.thu === $("fThu").value) &&
+          (!$("fBuoi").value || clean(x.buoi) === $("fBuoi").value) &&
+          (!$("fPoint").value || x.diemTruong === $("fPoint").value) &&
+          (!$("fClass").value || x.lop === $("fClass").value),
+      ),
   );
 }
 function setOptions(id, vals, prefix) {
@@ -2284,12 +2718,17 @@ function pointBadge(s, compact = false) {
 function renderStats() {
   // BƯỚC 5.6.2B.8A: giao diện chính dùng cùng bộ lọc môn hợp lệ
   // với Xem trước/Excel/PDF/In; không tính các ô rác của bảng Cộng.
-  const dashboardLessons = allLessons.filter((x) => isValidOutputSubject(x?.monHoc));
+  const dashboardLessons = allLessons.filter((x) =>
+    isValidOutputSubject(x?.monHoc),
+  );
   let p = (x) =>
     dashboardLessons.filter((y) => normKey(y.diemTruong).includes(x)).length;
   let vals = [
     ["TỔNG TIẾT", dashboardLessons.length],
-    ["BUỔI SÁNG", dashboardLessons.filter((x) => normKey(x.buoi) === "sang").length],
+    [
+      "BUỔI SÁNG",
+      dashboardLessons.filter((x) => normKey(x.buoi) === "sang").length,
+    ],
     [
       "BUỔI CHIỀU",
       dashboardLessons.filter((x) => normKey(x.buoi) === "chieu").length,
@@ -2297,7 +2736,10 @@ function renderStats() {
     ["ĐIỂM CHÍNH", p("chinh")],
     ["THIÊN TUẾ", p("thien tue")],
     ["BÃI BẤC", p("bai bac")],
-    ["SỐ LỚP", new Set(dashboardLessons.map((x) => x.lop).filter(Boolean)).size],
+    [
+      "SỐ LỚP",
+      new Set(dashboardLessons.map((x) => x.lop).filter(Boolean)).size,
+    ],
   ];
   $("stats").innerHTML = vals
     .map(([a, b]) => `<div class="card"><small>${a}</small><b>${b}</b></div>`)
@@ -2428,14 +2870,32 @@ function bindLessonClicks() {
 const HDTN_TRACK_SUBJECTS = { 1: "HĐTN 1", 2: "HĐTN 2", 3: "HĐTN 3" };
 function hdtntypeFromLabel(value) {
   const k = normKey(value).replace(/[^a-z0-9]+/g, "");
-  if (/^(?:hdtn|hoatdongtrainghiem)1$/.test(k) || k === "shdc" || k === "sinhhoatduoico") return 1;
-  if (/^(?:hdtn|hoatdongtrainghiem)2$/.test(k) || k === "hdgdcd" || k === "hoatdonggiaoductheochude") return 2;
-  if (/^(?:hdtn|hoatdongtrainghiem)3$/.test(k) || k === "shl" || k === "sinhhoatlop" || k === "shlop") return 3;
+  if (
+    /^(?:hdtn|hoatdongtrainghiem)1$/.test(k) ||
+    k === "shdc" ||
+    k === "sinhhoatduoico"
+  )
+    return 1;
+  if (
+    /^(?:hdtn|hoatdongtrainghiem)2$/.test(k) ||
+    k === "hdgdcd" ||
+    k === "hoatdonggiaoductheochude"
+  )
+    return 2;
+  if (
+    /^(?:hdtn|hoatdongtrainghiem)3$/.test(k) ||
+    k === "shl" ||
+    k === "sinhhoatlop" ||
+    k === "shlop"
+  )
+    return 3;
   return null;
 }
 function isHDTNSubject(value) {
   const k = normKey(value).replace(/[^a-z0-9]+/g, "");
-  return /^(?:hdtn[123]?|hoatdongtrainghiem[123]?|hdgdcd|hoatdonggiaoductheochude|shdc|sinhhoatduoico|shl|shlop|sinhhoatlop)$/.test(k);
+  return /^(?:hdtn[123]?|hoatdongtrainghiem[123]?|hdgdcd|hoatdonggiaoductheochude|shdc|sinhhoatduoico|shl|shlop|sinhhoatlop)$/.test(
+    k,
+  );
 }
 function hdtntimetableKey(x) {
   return [normKey(x.sheetNguon || x.diemTruong), normKey(x.lop)].join("|");
@@ -2444,14 +2904,20 @@ function hdtnSlotId(x) {
   return [normKey(x.thu), normKey(x.buoi), Number(x.tiet)].join("|");
 }
 function hdtnDayIndex(thu) {
-  return { hai: 2, ba: 3, tu: 4, nam: 5, sau: 6, bay: 7, chunhat: 8 }[normKey(thu)] || 99;
+  return (
+    { hai: 2, ba: 3, tu: 4, nam: 5, sau: 6, bay: 7, chunhat: 8 }[
+      normKey(thu)
+    ] || 99
+  );
 }
 function allTimetableRowsForHDTN() {
   // Chỉ khi có lịch cả lớp mới được suy ra vị trí thứ nhất/hai/ba;
   // không dùng riêng các tiết của giáo viên đang xem để suy đoán.
   const byTeacher = meta?.lessonsByTeacher;
   if (!byTeacher || !Object.keys(byTeacher).length) return [];
-  return Object.values(byTeacher).flatMap((rows) => Array.isArray(rows) ? rows : []);
+  return Object.values(byTeacher).flatMap((rows) =>
+    Array.isArray(rows) ? rows : [],
+  );
 }
 // Phân công đã được giáo viên xác nhận cho TKB tháng 11/2026.
 // Không suy mạch HĐTN từ thứ tự các ô cả lớp 2C: bảng nguồn có bốn ô HĐTN,
@@ -2463,15 +2929,21 @@ const VERIFIED_DAM_HDTN_SLOTS = [
 ];
 function verifiedDamHDTNTrack(x) {
   // Chỉ áp dụng cho đúng giáo viên; không ép loại tiết của các GV khác.
-  if (normalizeTeacherName(selectedTeacher) !== normalizeTeacherName(TEACHER)) return null;
+  if (normalizeTeacherName(selectedTeacher) !== normalizeTeacherName(TEACHER))
+    return null;
   const sheet = normKey(x?.sheetNguon || "");
   const lop = normalizeClassName(x?.lop || "");
   const thu = normKey(x?.thu || "");
   const buoi = normKey(x?.buoi || "");
   const tiet = Number(x?.tiet);
-  const rule = VERIFIED_DAM_HDTN_SLOTS.find(v =>
-    v.sheet === sheet && v.lop === lop && v.thu === thu &&
-    v.buoi === buoi && v.tiet === tiet);
+  const rule = VERIFIED_DAM_HDTN_SLOTS.find(
+    (v) =>
+      v.sheet === sheet &&
+      v.lop === lop &&
+      v.thu === thu &&
+      v.buoi === buoi &&
+      v.tiet === tiet,
+  );
   // Trường hợp không có thông tin ô nguồn (bản TKB lưu cũ), vẫn phải đúng
   // cả giáo viên + lớp + sheet + thứ + buổi + tiết; không tự suy các ô khác.
   return rule ? rule.track : null;
@@ -2485,18 +2957,26 @@ function hdtnTrackForTimetableLesson(x) {
   // Ngoài các vị trí đã xác nhận, chỉ dùng quy tắc suy loại tiết lớp 3
   // khi có đủ cả ba tiết HĐTN của chính lớp trong TKB nguồn.
   if (gradeFromClass(x.lop) !== 3) return null;
-  const key = hdtntimetableKey(x), unique = new Map();
+  const key = hdtntimetableKey(x),
+    unique = new Map();
   for (const item of allTimetableRowsForHDTN()) {
     if (!isHDTNSubject(item.monHoc) || hdtntimetableKey(item) !== key) continue;
     unique.set(hdtnSlotId(item), item);
   }
-  const sessions = [...unique.values()].sort((a,b) =>
-    hdtnDayIndex(a.thu) - hdtnDayIndex(b.thu) ||
-    (normKey(a.buoi) === 'sang' ? 0 : 1) - (normKey(b.buoi) === 'sang' ? 0 : 1) ||
-    Number(a.tiet) - Number(b.tiet));
+  const sessions = [...unique.values()].sort(
+    (a, b) =>
+      hdtnDayIndex(a.thu) - hdtnDayIndex(b.thu) ||
+      (normKey(a.buoi) === "sang" ? 0 : 1) -
+        (normKey(b.buoi) === "sang" ? 0 : 1) ||
+      Number(a.tiet) - Number(b.tiet),
+  );
   // Chỉ suy theo thứ tự khi có đúng ba tiết, đầu tuần chào cờ và cuối tuần sinh hoạt lớp.
-  if (sessions.length !== 3 || hdtnDayIndex(sessions[0].thu) !== 2 ||
-      hdtnDayIndex(sessions[2].thu) !== 6) return null;
+  if (
+    sessions.length !== 3 ||
+    hdtnDayIndex(sessions[0].thu) !== 2 ||
+    hdtnDayIndex(sessions[2].thu) !== 6
+  )
+    return null;
   const pos = sessions.findIndex((item) => hdtnSlotId(item) === hdtnSlotId(x));
   return pos >= 0 ? pos + 1 : null;
 }
@@ -2550,9 +3030,11 @@ function subjectAliasKeys(subject) {
 }
 function registerPlanSubject(subject) {
   const track = hdtntypeFromLabel(subject);
-  const canonical = track ? HDTN_TRACK_SUBJECTS[track] : clean(subject)
-    .replace(/^môn\s+/iu, "")
-    .trim();
+  const canonical = track
+    ? HDTN_TRACK_SUBJECTS[track]
+    : clean(subject)
+        .replace(/^môn\s+/iu, "")
+        .trim();
   if (!canonical) return canonical;
   for (const k of subjectAliasKeys(canonical))
     planSubjectCatalog.set(k, canonical);
@@ -2599,8 +3081,14 @@ function planKey(subject, grade, week) {
 function parsePlanSection(text) {
   const x = clean(text);
   // Nhận 6 đề mục HĐTN 1/2/3 – Lớp 2 hoặc Lớp 3 trong Word.
-  const activity = x.match(/(?:Hoạt\s*động\s*trải\s*nghiệm|HĐTN)\s*([123])\s*[–—-]\s*Lớp\s*(\d{1,2})(?:\b|$)/iu);
-  if (activity) return { subject: registerPlanSubject(`HĐTN ${activity[1]}`), grade: Number(activity[2]) };
+  const activity = x.match(
+    /(?:Hoạt\s*động\s*trải\s*nghiệm|HĐTN)\s*([123])\s*[–—-]\s*Lớp\s*(\d{1,2})(?:\b|$)/iu,
+  );
+  if (activity)
+    return {
+      subject: registerPlanSubject(`HĐTN ${activity[1]}`),
+      grade: Number(activity[2]),
+    };
   // Nhận động mọi tiêu đề: "Môn <tên môn> – Lớp <khối>".
   const m = x.match(/(?:^|\b)Môn\s+(.+?)\s*[–—-]\s*Lớp\s*(\d{1,2})(?:\b|$)/iu);
   if (!m) return null;
@@ -2703,7 +3191,9 @@ async function readPlanExcel(file) {
 function isIncompleteHDTNTitle(record) {
   if (!record || !hdtntypeFromLabel(record.subject)) return false;
   const title = normKey(record.title).replace(/\s+/g, " ").trim();
-  return /^(?:bai\s*\d+\s*:\s*)?(?:sinh hoat duoi co|hoat dong giao duc theo chu de|sinh hoat lop\s*:\s*sinh hoat theo chu de)\s*:\s*$/.test(title);
+  return /^(?:bai\s*\d+\s*:\s*)?(?:sinh hoat duoi co|hoat dong giao duc theo chu de|sinh hoat lop\s*:\s*sinh hoat theo chu de)\s*:\s*$/.test(
+    title,
+  );
 }
 function appendix2IncompleteHDTNRows() {
   return [...lessonPlanMap.values()].filter(isIncompleteHDTNTitle);
@@ -2711,10 +3201,17 @@ function appendix2IncompleteHDTNRows() {
 function appendix2Grade2SameContentWarning() {
   // Dữ liệu Word lớp 2 người dùng cung cấp có ba bảng giống hệt nhau.
   // Chỉ cảnh báo kiểm tra bản gốc, KHÔNG sửa/tự tạo nội dung hay đổi mạch.
-  const rows = [1,2,3].map(track => Array.from({length:35}, (_,n) =>
-    lessonPlanMap.get(planKey(HDTN_TRACK_SUBJECTS[track], 2, n+1))));
-  return rows.every(track => track.every(Boolean)) &&
-    rows[0].every((r,i) => rows[1][i].title === r.title && rows[2][i].title === r.title);
+  const rows = [1, 2, 3].map((track) =>
+    Array.from({ length: 35 }, (_, n) =>
+      lessonPlanMap.get(planKey(HDTN_TRACK_SUBJECTS[track], 2, n + 1)),
+    ),
+  );
+  return (
+    rows.every((track) => track.every(Boolean)) &&
+    rows[0].every(
+      (r, i) => rows[1][i].title === r.title && rows[2][i].title === r.title,
+    )
+  );
 }
 function applyLessonPlan() {
   const week = Number($("weekSelect").value || 1);
@@ -2726,16 +3223,22 @@ function applyLessonPlan() {
       candidate = lessonPlanMap.get(planKey(subject, grade, week)),
       incomplete = isIncompleteHDTNTitle(candidate),
       plan = incomplete ? null : candidate;
-    const unknownTrack = isHDTNSubject(x.monHoc) && !hdtnTrackForTimetableLesson(x);
+    const unknownTrack =
+      isHDTNSubject(x.monHoc) && !hdtnTrackForTimetableLesson(x);
     x.planIssue = incomplete
       ? "Phụ lục 2 chưa ghi nội dung chi tiết của tiết HĐTN này."
-      : unknownTrack ? "Chưa xác định được loại tiết HĐTN trong TKB." : "";
+      : unknownTrack
+        ? "Chưa xác định được loại tiết HĐTN trong TKB."
+        : "";
     x.planWeek = week;
     x.planSubject = subject;
     x.planGrade = grade;
     x.plan = plan || null;
     if (plan) matched++;
-    else missing.push(`${x.lop} · ${subject}${incomplete ? " (PL2 thiếu nội dung chi tiết)" : unknownTrack ? " (chưa rõ loại tiết HĐTN)" : " (chưa có bài tương ứng trong PL2)"}`);
+    else
+      missing.push(
+        `${x.lop} · ${subject}${incomplete ? " (PL2 thiếu nội dung chi tiết)" : unknownTrack ? " (chưa rõ loại tiết HĐTN)" : " (chưa có bài tương ứng trong PL2)"}`,
+      );
   }
   if (!lessonPlanMap.size) {
     $("pl2Match").className = "info pl2-match";
@@ -2899,8 +3402,8 @@ function parseWorkbookFile(file) {
           });
           for (let r = hr + 1; r < rows.length; r++)
             for (const ch of classes)
-              teacherNamesFromCell(rows[r][ch.col], expectedTeachers).forEach((n) =>
-                teacherSet.add(n),
+              teacherNamesFromCell(rows[r][ch.col], expectedTeachers).forEach(
+                (n) => teacherSet.add(n),
               );
         }
         if (!teacherSet.size) teacherSet.add(TEACHER);
@@ -2912,7 +3415,12 @@ function parseWorkbookFile(file) {
           const teacherLessons = [];
           const teacherErrors = [];
           for (const sn of sheets) {
-            const r = extractTeacherLessons(sn, wb.Sheets[sn], teacherName, expectedTeachers);
+            const r = extractTeacherLessons(
+              sn,
+              wb.Sheets[sn],
+              teacherName,
+              expectedTeachers,
+            );
             teacherLessons.push(...r.lessons);
             teacherErrors.push(...r.errors);
           }
@@ -2930,7 +3438,12 @@ function parseWorkbookFile(file) {
         lessons = lessonsByTeacher[selectedKey] || [];
         // counts/errors ở Bước 5.6.1 phản ánh đúng giáo viên đang xem.
         for (const sn of sheets) {
-          const r = extractTeacherLessons(sn, wb.Sheets[sn], selectedKey, expectedTeachers);
+          const r = extractTeacherLessons(
+            sn,
+            wb.Sheets[sn],
+            selectedKey,
+            expectedTeachers,
+          );
           counts[sn] = r.lessons.length;
           errors.push(...r.errors);
         }
@@ -2974,96 +3487,220 @@ function versionRangeText(v) {
 async function readWorkbooks(files) {
   const list = [...files];
   if (!list.length) return;
-  // Mốc hiệu lực do người dùng chọn. TKB đầu năm mặc định từ Tuần 1; khi đổi TKB chọn tuần bắt đầu áp dụng.
   const startWeek = Math.max(
     1,
     Math.min(35, Number($("effectiveFromWeek")?.value || 1)),
   );
+  let changed = false;
   for (let i = 0; i < list.length; i++) {
     const file = list[i];
     try {
-      const parsed = await parseWorkbookFile(file);
-      updateTeacherSelector(parsed.teachers);
-      // BƯỚC 5.6.1C: không hiện cảnh báo lệch theo bảng “Cộng”.
-      // Danh sách giáo viên và tổng tiết lấy từ các ô TKB thực tế.
-      // Luôn cập nhật GVCN từ file vừa đọc, kể cả khi TKB bị phát hiện trùng và không lưu lại.
-      mergeHomeroomTeachersFromLessons(parsed.lessons);
-      enrichAllScheduleVersionsWithHomeroom();
-      saveScheduleRepository();
-      const sw = Math.min(35, startWeek + i),
-        fingerprint = scheduleFingerprint(parsed.lessons),
-        duplicate = findDuplicateSchedule(fingerprint);
-      if (duplicate) {
-        // BƯỚC 5.6.1A: bản TKB cũ trên Supabase chỉ lưu các tiết của Đậm.
-        // Khi người dùng tải lại đúng file gốc, bổ sung bản đồ đa giáo viên vào phiên bản đang dùng
-        // thay vì bỏ toàn bộ kết quả parse vì "trùng".
-        duplicate.teachers = parsed.teachers;
-        duplicate.lessonsByTeacher = parsed.lessonsByTeacher;
-        let multiTeacherSync = null;
-        if (currentAuthUser)
-          multiTeacherSync = await syncTimetableTeacherRowsToSupabase(duplicate);
-        saveScheduleRepository();
-        alert(
-          `TKB "${file.name}" trùng với bản đã lưu "${duplicate.file}" (hiệu lực từ Tuần ${duplicate.startWeek}).\n\nĐã cập nhật danh sách và TKB của các giáo viên từ file gốc lên Supabase${multiTeacherSync ? ` (${multiTeacherSync.teachers} giáo viên / ${multiTeacherSync.rows} tiết)` : ""}; không tạo thêm phiên bản trùng.`,
-        );
-        continue;
-      }
-      const now = new Date(),
-        uploadedAt = now.toISOString(),
-        uploadedAtLabel = now.toLocaleString("vi-VN");
-      const version = {
-        startWeek: sw,
-        uploadedAt,
-        uploadedAtLabel,
-        fingerprint,
-        ...parsed,
-      };
       if (!currentAuthUser) {
         alert(
-          "Bạn cần đăng nhập giáo viên trước khi thêm TKB mới để dữ liệu được lưu đúng tài khoản trên Supabase.",
+          "Vui lòng đăng nhập tài khoản giáo viên trước khi bổ sung hoặc khôi phục TKB.",
+        );
+        break;
+      }
+      const parsed = await parseWorkbookFile(file);
+      const sw = Math.min(35, startWeek + i);
+      const lessons = parsed.lessons || [];
+      if (!lessons.length) {
+        alert(
+          `Tệp ${file.name} không có tiết học của giáo viên ${selectedTeacher}. Không lưu tệp rỗng.`,
         );
         continue;
       }
+      const baseFingerprint = scheduleFingerprint(lessons);
+      const duplicate = findDuplicateSchedule(baseFingerprint, sw);
+      if (duplicate) {
+        alert(
+          `File "${file.name}" đã có đủ ${lessons.length} tiết ở Tuần ${sw} (bản "${duplicate.file}"). Không cần lưu lại. Không có dữ liệu nào bị xóa.`,
+        );
+        continue;
+      }
+      const active = effectiveScheduleForWeek(sw);
+      const previousLessons = active ? lessonsForSelectedTeacher(active) : [];
+      const oldDays = namedDayCounts(previousLessons),
+        newDays = namedDayCounts(lessons);
+      const missing = Object.keys(oldDays).filter(
+        (d) => oldDays[d] > 0 && newDays[d] === 0,
+      );
       const sameWeek = scheduleVersions.filter(
         (v) => Number(v.startWeek) === sw,
       );
-      let replaceSameWeek = false;
-      if (sameWeek.length) {
-        replaceSameWeek = confirm(
-          `Tuần ${sw} hiện đã có ${sameWeek.length} phiên bản TKB.\n\nOK = lưu bản mới và THAY THẾ các phiên bản cũ cùng mốc Tuần ${sw}.\nCancel = giữ các bản cũ và thêm bản mới song song.`,
-        );
-      }
+      const newSummary = Object.entries(newDays)
+        .map(([d, n]) => `Thứ ${d}: ${n}`)
+        .join(" · ");
+      let note = `ĐÃ ĐỌC FILE EXCEL: ${file.name}\n\nGiáo viên: ${selectedTeacher}\nHiệu lực từ Tuần: ${sw}\nSố tiết mới: ${lessons.length}\n${newSummary}\n`;
+      if (active)
+        note += `\nBản đang có hiệu lực: ${active.file} (${previousLessons.length} tiết).`;
+      if (sameWeek.length)
+        note += `\nCó ${sameWeek.length} phiên bản ở cùng mốc tuần. Tất cả bản cũ vẫn được giữ nguyên.`;
+      if (missing.length)
+        note += `\n\n⚠ CẢNH BÁO: Tệp mới KHÔNG có ${missing.map((d) => "Thứ " + d).join(", ")} trong khi TKB trước có. Vui lòng đối chiếu Excel trước khi tiếp tục.`;
+      note += `\n\nOK = LƯU THÊM phiên bản mới, không xóa bản cũ.\nCancel = HỦY, giữ nguyên dữ liệu đang có.`;
+      if (!confirm(note)) continue;
+      const now = new Date(),
+        uploadedAt = now.toISOString();
+      const version = {
+        startWeek: sw,
+        uploadedAt,
+        uploadedAtLabel: now.toLocaleString("vi-VN"),
+        fingerprint: safeVersionFingerprint(baseFingerprint, sw),
+        contentFingerprint: baseFingerprint,
+        ...parsed,
+      };
+      // Chỉ ghi phiên bản mới. Tuyệt đối không xóa/ghi đè tiết của phiên bản cũ.
       await saveTimetableVersionToSupabase(version);
       scheduleVersions.push(version);
-      if (replaceSameWeek) {
-        try {
-          for (const oldVersion of sameWeek)
-            await removeScheduleVersion(oldVersion);
-        } catch (cleanErr) {
-          console.error(
-            "[TKB] Bản mới đã lưu nhưng chưa dọn hết bản cũ cùng tuần",
-            cleanErr,
-          );
-          alert(
-            "Bản TKB mới đã được lưu và đang được ưu tiên, nhưng chưa xóa hết bản cũ cùng tuần. Bạn có thể xóa thủ công trong Kho TKB.",
-          );
-        }
-      }
+      updateTeacherSelector(parsed.teachers);
+      mergeHomeroomTeachersFromLessons(parsed.lessons);
+      enrichAllScheduleVersionsWithHomeroom();
       scheduleVersions.sort(
         (a, b) =>
           a.startWeek - b.startWeek ||
           String(a.uploadedAt || "").localeCompare(String(b.uploadedAt || "")),
       );
       saveScheduleRepository();
+      changed = true;
       alert(
-        `Đã lưu TKB mới vào Supabase. Hiệu lực từ Tuần ${sw}.${replaceSameWeek ? " Các phiên bản cũ cùng tuần đã được thay thế." : ""}`,
+        `Đã thêm an toàn TKB "${file.name}" hiệu lực từ Tuần ${sw}: ${lessons.length} tiết. Các phiên bản cũ KHÔNG bị xóa. Có thể xem lại trong Kho TKB.`,
       );
     } catch (err) {
-      alert(`Không đọc được ${file.name}: ${err.message || err}`);
+      console.error("[TKB] Lỗi bổ sung/khôi phục TKB", err);
+      alert(
+        `Chưa thể thêm TKB "${file.name}": ${err?.message || err}\n\nKho TKB trước đó chưa bị xóa bởi thao tác nhập này.`,
+      );
     }
   }
-  activateSelectedWeek();
+  if (changed) activateSelectedWeek();
 }
+
+// KHÔI PHỤC TUẦN ĐANG XEM: chọn duy nhất tuần của giao diện, không dùng
+// ô TKB hiệu lực từ (mặc định Tuần 1) để tránh lưu Excel nhầm mốc tuần.
+// Không xóa phiên bản cũ; chỉ thêm phiên bản đã kiểm tra vào Supabase.
+async function restoreCurrentWeekFromExcel(file) {
+  if (!currentAuthUser || !supabaseClient)
+    throw new Error(
+      "Cần đăng nhập Supabase trước khi khôi phục thời khóa biểu.",
+    );
+  const week = Number($("weekSelect")?.value || 0);
+  if (!Number.isInteger(week) || week < 1 || week > 35)
+    throw new Error("Tuần đang xem không hợp lệ.");
+  const teacherAtStart = selectedTeacher;
+  const ownerAtStart = currentAuthUser.id;
+  const oldVersion = effectiveScheduleForWeek(week);
+  const oldLessons = lessonsForSelectedTeacher(oldVersion);
+  const parsed = await parseWorkbookFile(file);
+  const newLessons = parsed.lessons || [];
+  if (!newLessons.length)
+    throw new Error(
+      `Không tìm thấy tiết của giáo viên ${teacherAtStart} trong Excel.`,
+    );
+  if (newLessons.length < oldLessons.length)
+    throw new Error(
+      `Tệp mới chỉ có ${newLessons.length} tiết, ít hơn bản đang dùng (${oldLessons.length}). Không tự thay thế TKB bằng dữ liệu thiếu; hãy kiểm tra lại Excel.`,
+    );
+  const oldDays = namedDayCounts(oldLessons);
+  const newDays = namedDayCounts(newLessons);
+  const labelDays = (d) =>
+    Object.entries(d)
+      .map(([k, v]) => `Thứ ${k}: ${v}`)
+      .join(" | ");
+  const regress = Object.keys(oldDays).filter(
+    (day) => oldDays[day] > 0 && newDays[day] === 0,
+  );
+  if (regress.length)
+    throw new Error(
+      `Tệp mới thiếu ${regress.map((x) => "Thứ " + x).join(", ")} vốn có ở bản hiện tại. Không tự thay thế; hãy kiểm tra tệp nguồn.`,
+    );
+  const baseFingerprint = scheduleFingerprint(newLessons);
+  const exact = findDuplicateSchedule(baseFingerprint, week);
+  if (exact && Number(exact.lessons?.length || 0) === newLessons.length) {
+    // Nếu bản đã có đầy đủ trên kho thì cần xem nó đã được chọn hay chưa.
+    const active = effectiveScheduleForWeek(week);
+    if (active?.supabaseId === exact.supabaseId) {
+      throw new Error(
+        `Kho đã có ${newLessons.length} tiết cho Tuần ${week}; không cần nhập trùng. Nếu vẫn hiển thị ít hơn, hãy chụp mục Kho TKB để kiểm tra thứ tự hiệu lực.`,
+      );
+    }
+  }
+  const message = [
+    `KHÔI PHỤC TKB TUẦN ${week} – GIÁO VIÊN ${teacherAtStart}`,
+    `File nguồn: ${file.name}`,
+    `TKB đang hiển thị: ${oldLessons.length} tiết – ${labelDays(oldDays)}`,
+    `TKB đọc từ Excel: ${newLessons.length} tiết – ${labelDays(newDays)}`,
+    ``,
+    `Nhấn OK để LƯU THÊM bản Excel làm phiên bản mới từ Tuần ${week}.`,
+    `Các bản cũ (kể cả TKB tháng 9) KHÔNG bị xóa.`,
+    `Nhấn Hủy nếu số tiết hoặc tuần chưa đúng.`,
+  ].join("\n");
+  if (!confirm(message)) return { cancelled: true, week };
+  // Không đổi tài khoản/giáo viên giữa lúc đọc tệp và lưu.
+  if (
+    currentAuthUser?.id !== ownerAtStart ||
+    selectedTeacher !== teacherAtStart
+  )
+    throw new Error("Tài khoản hoặc giáo viên vừa thay đổi. Vui lòng thử lại.");
+  const now = new Date();
+  const version = {
+    ...parsed,
+    startWeek: week,
+    uploadedAt: now.toISOString(),
+    uploadedAtLabel: now.toLocaleString("vi-VN"),
+    fingerprint: safeVersionFingerprint(baseFingerprint, week),
+    contentFingerprint: baseFingerprint,
+  };
+  await saveTimetableVersionToSupabase(version);
+  // Đọc lại DB ngay sau khi ghi: tránh báo đạt chỉ dựa vào dữ liệu RAM.
+  const teacherKey =
+    Object.keys(parsed.lessonsByTeacher || {}).find(
+      (k) => normalizeTeacherName(k) === normalizeTeacherName(teacherAtStart),
+    ) || teacherAtStart;
+  const { data: remoteRows, error: remoteError } = await supabaseClient
+    .from("tkb_timetable_lessons")
+    .select("thu")
+    .eq("timetable_version_id", version.supabaseId)
+    .eq("user_id", ownerAtStart)
+    .eq("teacher_name", teacherKey);
+  if (remoteError)
+    throw new Error(
+      "Đã tạo phiên bản nhưng chưa đọc xác minh Supabase: " +
+        (remoteError.message || remoteError),
+    );
+  if ((remoteRows || []).length !== newLessons.length)
+    throw new Error(
+      `Supabase mới xác minh được ${(remoteRows || []).length}/${newLessons.length} tiết; chưa xác nhận hoàn tất. Không xóa dữ liệu, hãy chụp lỗi này.`,
+    );
+  scheduleVersions.push(version);
+  updateTeacherSelector(parsed.teachers);
+  mergeHomeroomTeachersFromLessons(parsed.lessons);
+  enrichAllScheduleVersionsWithHomeroom();
+  scheduleVersions.sort(
+    (a, b) =>
+      a.startWeek - b.startWeek ||
+      String(a.uploadedAt || "").localeCompare(String(b.uploadedAt || "")),
+  );
+  saveScheduleRepository();
+  activateSelectedWeek();
+  const chosen = effectiveScheduleForWeek(week);
+  const activeLessons = lessonsForSelectedTeacher(chosen);
+  if (
+    chosen?.supabaseId !== version.supabaseId ||
+    activeLessons.length !== newLessons.length
+  )
+    throw new Error(
+      `Đã xác minh Supabase lưu đủ ${newLessons.length} tiết, nhưng phiên bản đang chọn chưa chuyển sang bản mới. Hãy mở Kho TKB để kiểm tra mốc hiệu lực; không nhập tiếp.`,
+    );
+  return {
+    week,
+    count: newLessons.length,
+    days: newDays,
+    file: file.name,
+    supabaseId: version.supabaseId,
+  };
+}
+
 function activateSelectedWeek() {
   const week = Number($("weekSelect").value || 1),
     saved = effectiveScheduleForWeek(week);
@@ -3094,7 +3731,9 @@ function activateSelectedWeek() {
   }
 }
 function finishLoad() {
-  const dashboardLessons = allLessons.filter((x) => isValidOutputSubject(x?.monHoc));
+  const dashboardLessons = allLessons.filter((x) =>
+    isValidOutputSubject(x?.monHoc),
+  );
   let month =
     meta.file.match(/(?:THÁNG|THANG)\s*([0-9]{1,2})[.\-\s]*(20\d{2})/i) || [];
   $("fileInfo").innerHTML =
@@ -3202,34 +3841,36 @@ function saveOutputEdits(edits) {
 function outputScheduleData() {
   applyLessonPlan();
   const edits = loadOutputEdits();
-  return filterSchedule()
-    .map((x) => {
-      const e = edits[outputLessonId(x)];
-      if (e?.deleted) return null;
-      if (!e) return x;
-      const y = { ...x };
-      if (e.monHoc !== undefined) y.monHoc = e.monHoc;
-      if (e.lop !== undefined) y.lop = e.lop;
-      if (e.title !== undefined)
-        y.plan = {
-          ...(x.plan || {}),
-          title: e.title,
-          annualPeriod:
-            e.annualPeriod !== undefined
-              ? e.annualPeriod
-              : x.plan?.annualPeriod || x.planWeek || "",
-          week: x.plan?.week || x.planWeek,
-          subject: normalizeSubjectForPlan(
-            e.monHoc !== undefined ? e.monHoc : x.monHoc,
-          ),
-          grade: gradeFromClass(e.lop !== undefined ? e.lop : x.lop),
-        };
-      return y;
-    })
-    // BƯỚC 5.6.2B.9E.1B: TKB chính thức mới chỉ có Tiết 1–7.
-    // Lọc ngay tại nguồn dữ liệu đầu ra để Preview/Excel/PDF/In/Google Sheet
-    // không thể tái hiện Tiết 8 còn sót trong cache/phiên cũ.
-    .filter((x) => x && Number(x.tiet) >= 1 && Number(x.tiet) <= 7);
+  return (
+    filterSchedule()
+      .map((x) => {
+        const e = edits[outputLessonId(x)];
+        if (e?.deleted) return null;
+        if (!e) return x;
+        const y = { ...x };
+        if (e.monHoc !== undefined) y.monHoc = e.monHoc;
+        if (e.lop !== undefined) y.lop = e.lop;
+        if (e.title !== undefined)
+          y.plan = {
+            ...(x.plan || {}),
+            title: e.title,
+            annualPeriod:
+              e.annualPeriod !== undefined
+                ? e.annualPeriod
+                : x.plan?.annualPeriod || x.planWeek || "",
+            week: x.plan?.week || x.planWeek,
+            subject: normalizeSubjectForPlan(
+              e.monHoc !== undefined ? e.monHoc : x.monHoc,
+            ),
+            grade: gradeFromClass(e.lop !== undefined ? e.lop : x.lop),
+          };
+        return y;
+      })
+      // BƯỚC 5.6.2B.9E.1B: TKB chính thức mới chỉ có Tiết 1–7.
+      // Lọc ngay tại nguồn dữ liệu đầu ra để Preview/Excel/PDF/In/Google Sheet
+      // không thể tái hiện Tiết 8 còn sót trong cache/phiên cũ.
+      .filter((x) => x && Number(x.tiet) >= 1 && Number(x.tiet) <= 7)
+  );
 }
 function outputEditRowsHtml() {
   applyLessonPlan();
@@ -3242,8 +3883,7 @@ function outputEditRowsHtml() {
       const id = outputLessonId(x),
         e = edits[id] || {},
         deleted = !!e.deleted;
-      const mon =
-          e.monHoc !== undefined ? e.monHoc : displayTeachingSubject(x),
+      const mon = e.monHoc !== undefined ? e.monHoc : displayTeachingSubject(x),
         lop = e.lop !== undefined ? e.lop : clean(x.lop);
       const title =
         e.title !== undefined
@@ -3329,7 +3969,9 @@ function exportExcel() {
     rows.push([
       "Chiều",
       maxMorning + t,
-      ...days.map((day) => excelLessonCellFormal(d, day, "Chiều", maxMorning + t)),
+      ...days.map((day) =>
+        excelLessonCellFormal(d, day, "Chiều", maxMorning + t),
+      ),
       "",
     ]);
   const totalRow = rows.length + 1;
@@ -3355,7 +3997,16 @@ function exportExcel() {
   // nhưng KHÔNG trộn vào số tiết dạy thực tế trên TKB.
   const concurrent = getConcurrentPeriods();
   if (concurrent > 0)
-    rows.push([subjects.length + 1, "Kiêm nhiệm", "", "", concurrent, "", "", ""]);
+    rows.push([
+      subjects.length + 1,
+      "Kiêm nhiệm",
+      "",
+      "",
+      concurrent,
+      "",
+      "",
+      "",
+    ]);
   const summaryDetailRows = subjects.length + (concurrent > 0 ? 1 : 0);
   const sumRow = rows.length + 1;
   rows.push(["", "Tổng số", "", "", d.length + concurrent, "", "", ""]);
@@ -3699,9 +4350,13 @@ function exportExcel() {
       };
     }
   XLSX.utils.book_append_sheet(wb, ws2, "Đối chiếu nguồn");
-  XLSX.writeFile(wb, `TKB_CA_NHAN_${outputTeacherFileKey()}_TUAN_${wd.week}.xlsx`, {
-    cellStyles: true,
-  });
+  XLSX.writeFile(
+    wb,
+    `TKB_CA_NHAN_${outputTeacherFileKey()}_TUAN_${wd.week}.xlsx`,
+    {
+      cellStyles: true,
+    },
+  );
 }
 function isOptionalPracticeSubject(subject) {
   const k = curriculumSubjectKey(subject);
@@ -3715,18 +4370,16 @@ function excelLessonCellFormal(data, day, session, tiet) {
   const period = Number(tiet);
   const expectedSession = period <= 4 ? "Sáng" : "Chiều";
   if (normKey(session) !== normKey(expectedSession)) return "";
-  const items = data.filter(
-    (x) =>
-      x.thu === day &&
-      Number(x.tiet) === period,
-  );
+  const items = data.filter((x) => x.thu === day && Number(x.tiet) === period);
   return items
     .map((x) => {
       const sub = displayTeachingSubject(x);
       const planTiet = x.plan?.annualPeriod || x.plan?.week || x.planWeek || "";
       const lesson = x.plan?.title
         ? `Tiết ${planTiet} - ${x.plan.title}`
-        : isOptionalPracticeSubject(x.monHoc) ? "" : `[Chưa ghép Phụ lục 2]`;
+        : isOptionalPracticeSubject(x.monHoc)
+          ? ""
+          : `[Chưa ghép Phụ lục 2]`;
       return `${sub} ${clean(x.lop)}${lesson ? ` ${lesson}` : ""}`;
     })
     .join("\n────────\n");
@@ -3791,16 +4444,36 @@ function outputTeacherDisplayName() {
     : clean(selectedTeacher);
 }
 function outputTeacherFileKey() {
-  return normKey(outputTeacherDisplayName()).replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "").toUpperCase() || "GIAO_VIEN";
+  return (
+    normKey(outputTeacherDisplayName())
+      .replace(/[^a-z0-9]+/g, "_")
+      .replace(/^_+|_+$/g, "")
+      .toUpperCase() || "GIAO_VIEN"
+  );
 }
 // HĐTN chung phải hiện trên TKB ngay cả khi Phụ lục 2 chưa ghép bài.
 // Phụ lục 2 được kiểm tra riêng và hiển thị cảnh báo nếu còn thiếu tên bài.
 function isValidOutputSubject(subject) {
   const key = curriculumSubjectKey(normalizeSubjectForPlan(subject));
   return new Set([
-    "tinhoc", "congnghe", "daoduc", "tiengviet", "toan",
-    "khoahoc", "tnxh", "lsdl", "mythuat", "amnhac", "gdtc",
-    "tienganh", "ltt", "lttv", "hdtn", "hdgdcd", "shdc", "shl"
+    "tinhoc",
+    "congnghe",
+    "daoduc",
+    "tiengviet",
+    "toan",
+    "khoahoc",
+    "tnxh",
+    "lsdl",
+    "mythuat",
+    "amnhac",
+    "gdtc",
+    "tienganh",
+    "ltt",
+    "lttv",
+    "hdtn",
+    "hdgdcd",
+    "shdc",
+    "shl",
   ]).has(key);
 }
 function buildFormalOutput(data) {
@@ -3811,9 +4484,11 @@ function buildFormalOutput(data) {
   // BƯỚC 5.6.2B.9E.1C: lọc ngay tại hàm dựng Phụ lục 1.4.
   // Một số luồng xem trước đa tuần/khôi phục gọi buildFormalOutput trực tiếp,
   // nên bộ lọc ở outputScheduleData chưa đủ để loại Tiết 8 cũ.
-  data = (data || []).filter((x) =>
-    isValidOutputSubject(x.monHoc) &&
-    Number(x.tiet) >= 1 && Number(x.tiet) <= 7
+  data = (data || []).filter(
+    (x) =>
+      isValidOutputSubject(x.monHoc) &&
+      Number(x.tiet) >= 1 &&
+      Number(x.tiet) <= 7,
   );
   const wd = selectedWeekDates(),
     days = ["Hai", "Ba", "Tư", "Năm", "Sáu"],
@@ -3834,9 +4509,10 @@ function buildFormalOutput(data) {
   // BƯỚC 5.6.2B.8B: TKB vẫn hiển thị đúng số tiết dạy thực tế;
   // Kiêm nhiệm chỉ xuất hiện trong TỔNG HỢP và được cộng vào tổng khối lượng.
   const concurrent = getConcurrentPeriods();
-  const concurrentRow = concurrent > 0
-    ? `<tr><td>${subjects.length + 1}</td><td>Kiêm nhiệm</td><td>${concurrent}</td><td></td></tr>`
-    : "";
+  const concurrentRow =
+    concurrent > 0
+      ? `<tr><td>${subjects.length + 1}</td><td>Kiêm nhiệm</td><td>${concurrent}</td><td></td></tr>`
+      : "";
   let sum = `<h3>TỔNG HỢP</h3><table class="formal-summary"><tr><th>TT</th><th>Nội dung</th><th>Số lượng tiết học</th><th>Ghi chú</th></tr>${subjects.map((sub, i) => `<tr><td>${i + 1}</td><td>${esc(sub)}</td><td>${data.filter((x) => normalizeSubjectForPlan(x.monHoc) === sub).length}</td><td></td></tr>`).join("")}${concurrentRow}<tr class="formal-summary-total"><th></th><th>Tổng số</th><th>${data.length + concurrent}</th><th></th></tr></table>`;
   return `<section id="formalOutput" class="formal-output"><div class="formal-title"><b>PHỤ LỤC 1.4</b><h2>Hoạt động giáo dục tuần ${wd.week}</h2><p><b>Năm học 2026 – 2027. ${esc(formalSubjectGradeText(data))}, Trường TH – THCS & THPT Lại Sơn</b></p><p><b>Tuần ${wd.week}: từ ngày ${wd.fmt(wd.start)} đến ${wd.fmt(wd.end)}</b></p></div>${grid}${sum}<div class="formal-date">${esc(formalSignatureDate(wd))}</div><div class="formal-sign"><div><b>P. HIỆU TRƯỞNG</b></div><div><b>TỔ TRƯỞNG</b></div><div><b>NGƯỜI LẬP KẾ HOẠCH</b><br><br><br><b>${esc(outputTeacherDisplayName())}</b></div></div></section>`;
 }
@@ -3982,14 +4658,15 @@ async function exportPDF() {
   }
 }
 async function openOutputPreview() {
-  if (!filterSchedule().length)
-    return alert("Không có dữ liệu để xem trước.");
+  if (!filterSchedule().length) return alert("Không có dữ liệu để xem trước.");
   let d;
   try {
     d = await sharedCurriculumPreviewData();
   } catch (err) {
     console.error("[TKB] Không đọc được PPCT chung cho Xem trước", err);
-    return alert(`Chưa đọc được kho PPCT chung để Xem trước: ${err?.message || err}`);
+    return alert(
+      `Chưa đọc được kho PPCT chung để Xem trước: ${err?.message || err}`,
+    );
   }
   ensureFormalOutputStyles();
   document.getElementById("outputPreviewModal")?.remove();
@@ -4157,10 +4834,56 @@ loadScheduleRepository();
 initSupabaseConnection();
 loadSchoolCalendar();
 activateSelectedWeek();
-$("fileInput").addEventListener(
-  "change",
-  (e) => e.target.files.length && readWorkbooks(e.target.files),
-);
+$("fileInput").addEventListener("change", async (e) => {
+  const files = Array.from(e.target.files || []);
+  e.target.value = ""; // Cho phép chọn lại chính tệp Excel vừa nhập, nếu cần khôi phục.
+  if (files.length) await readWorkbooks(files);
+});
+// Nút khôi phục độc lập, luôn lấy TUẦN ĐANG XEM chứ không dùng ô tuần hiệu lực.
+$("repairCurrentWeekBtn")?.addEventListener("click", () => {
+  if (!currentAuthUser) {
+    alert(
+      "Hãy đăng nhập Supabase trước khi khôi phục TKB. Chưa có dữ liệu nào bị sửa.",
+    );
+    return;
+  }
+  // Luôn sao lưu phiên bản kho hiện đang có trước khi chọn tệp để phục hồi.
+  if (!scheduleRecoveryBackup()) return;
+  $("repairCurrentWeekFile")?.click();
+});
+$("repairCurrentWeekFile")?.addEventListener("change", async (e) => {
+  const file = e.target.files?.[0] || null;
+  e.target.value = "";
+  if (!file) return;
+  const btn = $("repairCurrentWeekBtn");
+  const msg = $("repairCurrentWeekStatus");
+  if (btn) btn.disabled = true;
+  if (msg) msg.textContent = "Đang đọc và kiểm tra Excel ...";
+  try {
+    const result = await restoreCurrentWeekFromExcel(file);
+    if (result.cancelled) {
+      if (msg) msg.textContent = "Đã hủy, kho TKB giữ nguyên.";
+      return;
+    }
+    if (msg)
+      msg.textContent = `✓ Tuần ${result.week}: đã xác minh lưu ${result.count} tiết trên Supabase.`;
+    alert(`ĐÃ KHÔI PHỤC TUẦN ${result.week}
+${result.count} tiết đã được đọc từ Excel và xác minh trên Supabase.
+Đã chuyển sang bản mới; các phiên bản TKB cũ được giữ nguyên.
+
+Hãy tải lại trang (Ctrl+F5) để kiểm tra dữ liệu được giữ sau khi mở lại.`);
+  } catch (err) {
+    console.error("[TKB] Không thể khôi phục tuần đang xem", err);
+    if (msg)
+      msg.textContent = "⚠ Chưa xác nhận khôi phục: " + (err?.message || err);
+    alert(`KHÔI PHỤC CHƯA ĐẠT:
+${err?.message || err}
+
+Không tự xóa phiên bản trong Kho TKB.`);
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+});
 $("teacherSelect") &&
   $("teacherSelect").addEventListener("change", (e) =>
     switchViewedTeacher(e.target.value),
@@ -4175,9 +4898,12 @@ $("weekSelect").addEventListener("change", () => {
   activateSelectedWeek();
   markWorkingWeekChanged();
 });
-$("weekSyncRefresh")?.addEventListener("click", () => { void pullWorkingWeek({ initializeIfMissing: true }); });
+$("weekSyncRefresh")?.addEventListener("click", () => {
+  void pullWorkingWeek({ initializeIfMissing: true });
+});
 $("calendarBtn") && ($("calendarBtn").onclick = openCalendarManager);
 $("repoBtn") && ($("repoBtn").onclick = openRepoManager);
+$("tkbDiagBtn")?.addEventListener("click", openScheduleSourceDiagnostic);
 $("appendix2RepoBtn") &&
   ($("appendix2RepoBtn").onclick = openAppendix2RepoManager);
 $("curriculumProbeBtn") &&
@@ -4982,22 +5708,38 @@ function gsWeekRows(data, week, startRow) {
   // nhiều môn được trình bày gọn trong một dòng "Giảng dạy" nhưng vẫn giữ đủ tổng tiết.
   const dynamicCounts = new Map();
   data.forEach((x) => {
-    const subject = clean(normalizeSubjectForPlan(x?.monHoc || x?.plan?.subject || "")) || "Môn học";
+    const subject =
+      clean(normalizeSubjectForPlan(x?.monHoc || x?.plan?.subject || "")) ||
+      "Môn học";
     dynamicCounts.set(subject, (dynamicCounts.get(subject) || 0) + 1);
   });
-  const isDamSheet = normalizeTeacherName(clean(selectedTeacher || TEACHER)) === normalizeTeacherName(TEACHER);
+  const isDamSheet =
+    normalizeTeacherName(clean(selectedTeacher || TEACHER)) ===
+    normalizeTeacherName(TEACHER);
   let details;
   if (isDamSheet) {
-    const countOf = (name) => [...dynamicCounts.entries()].reduce((n, [k, v]) => {
-      const a = normKey(k).replace(/[^a-z0-9]+/g, ""), b = normKey(name).replace(/[^a-z0-9]+/g, "");
-      return n + ((a === b || a.includes(b) || b.includes(a)) ? v : 0);
-    }, 0);
-    details = [["Phòng máy", concurrent], ["Công nghệ", countOf("Công nghệ")], ["Tin học", countOf("Tin học")], ["Đạo đức", countOf("Đạo đức")]];
+    const countOf = (name) =>
+      [...dynamicCounts.entries()].reduce((n, [k, v]) => {
+        const a = normKey(k).replace(/[^a-z0-9]+/g, ""),
+          b = normKey(name).replace(/[^a-z0-9]+/g, "");
+        return n + (a === b || a.includes(b) || b.includes(a) ? v : 0);
+      }, 0);
+    details = [
+      ["Phòng máy", concurrent],
+      ["Công nghệ", countOf("Công nghệ")],
+      ["Tin học", countOf("Tin học")],
+      ["Đạo đức", countOf("Đạo đức")],
+    ];
   } else {
     const entries = [...dynamicCounts.entries()];
     const subjectText = entries.map(([k]) => k).join("\n");
-    const countText = entries.map(([,v]) => String(v)).join("\n");
-    details = [[subjectText || "Giảng dạy", countText || data.length], ["Kiêm nhiệm", concurrent], ["", ""], ["", ""]];
+    const countText = entries.map(([, v]) => String(v)).join("\n");
+    details = [
+      [subjectText || "Giảng dạy", countText || data.length],
+      ["Kiêm nhiệm", concurrent],
+      ["", ""],
+      ["", ""],
+    ];
   }
   const r = (n) => startRow + n,
     values = [];
@@ -5032,7 +5774,10 @@ function gsWeekRows(data, week, startRow) {
   for (let t = 1; t <= (multiTeacherSheet ? 4 : 3); t++)
     schedule.push(days.map((day) => cell(day, "Chiều", t)));
   const scheduleLastOffset = multiTeacherSheet ? 12 : 11;
-  values.push({ range: `C${r(5)}:G${r(scheduleLastOffset)}`, values: schedule });
+  values.push({
+    range: `C${r(5)}:G${r(scheduleLastOffset)}`,
+    values: schedule,
+  });
   values.push({ range: `A${r(multiTeacherSheet ? 13 : 12)}`, values: [[""]] });
   details.forEach((x, i) => {
     const row = r((multiTeacherSheet ? 16 : 15) + i);
@@ -5044,7 +5789,10 @@ function gsWeekRows(data, week, startRow) {
   });
   values.push(
     { range: `C${r(multiTeacherSheet ? 20 : 19)}`, values: [["Tổng số"]] },
-    { range: `E${r(multiTeacherSheet ? 20 : 19)}`, values: [[data.length + concurrent]] },
+    {
+      range: `E${r(multiTeacherSheet ? 20 : 19)}`,
+      values: [[data.length + concurrent]],
+    },
   );
   return values;
 }
@@ -5914,7 +6662,9 @@ async function exportSelectedWeek1To35ToGoogleSheet(options = {}) {
     // BƯỚC 5.2.11: khôi phục đúng hai cột bên trái của Phụ lục 1.4 cho mọi tuần.
     // Cột A = Buổi (Sáng/Chiều), cột B = Tiết; hàng trên cùng của hai cột là "Thời gian".
     // Chỉ tác động A:B trong phần lịch, không thay đổi dữ liệu bài học C:G hay phần Tổng hợp.
-    const multiTeacherSheet = normalizeTeacherName(clean(selectedTeacher || TEACHER)) !== normalizeTeacherName(TEACHER);
+    const multiTeacherSheet =
+      normalizeTeacherName(clean(selectedTeacher || TEACHER)) !==
+      normalizeTeacherName(TEACHER);
     const leftHeaderRow = specialWeek1 ? 8 : startRow + 3;
     const leftSubHeaderRow = leftHeaderRow + 1;
     const leftScheduleStart = leftHeaderRow + 2;
@@ -6380,21 +7130,44 @@ async function exportSelectedWeek1To35ToGoogleSheet(options = {}) {
         },
         {
           range: "B21:H24",
-          values: normalizeTeacherName(clean(selectedTeacher || TEACHER)) === normalizeTeacherName(TEACHER)
-            ? [
-                [1, "Tin học", "", counts["Tin học"], "", "", ""],
-                [2, "Công nghệ", "", counts["Công nghệ"], "", "", ""],
-                [3, "Kiêm nhiệm", "", concurrent, "", "", ""],
-                [4, "Đạo đức", "", counts["Đạo đức"], "", "", ""],
-              ]
-            : (() => {
-                const m = new Map();
-                data.forEach((x) => { const k = clean(normalizeSubjectForPlan(x?.monHoc || x?.plan?.subject || "")) || "Môn học"; m.set(k, (m.get(k) || 0) + 1); });
-                const entries = [...m.entries()];
-                const labels = entries.map(([k]) => k).join("\n");
-                const nums = entries.map(([,v]) => String(v)).join("\n");
-                return [[1, labels || "Giảng dạy", "", nums || data.length, "", "", ""], [2, "Kiêm nhiệm", "", concurrent, "", "", ""], ["", "", "", "", "", "", ""], ["", "", "", "", "", "", ""]];
-              })(),
+          values:
+            normalizeTeacherName(clean(selectedTeacher || TEACHER)) ===
+            normalizeTeacherName(TEACHER)
+              ? [
+                  [1, "Tin học", "", counts["Tin học"], "", "", ""],
+                  [2, "Công nghệ", "", counts["Công nghệ"], "", "", ""],
+                  [3, "Kiêm nhiệm", "", concurrent, "", "", ""],
+                  [4, "Đạo đức", "", counts["Đạo đức"], "", "", ""],
+                ]
+              : (() => {
+                  const m = new Map();
+                  data.forEach((x) => {
+                    const k =
+                      clean(
+                        normalizeSubjectForPlan(
+                          x?.monHoc || x?.plan?.subject || "",
+                        ),
+                      ) || "Môn học";
+                    m.set(k, (m.get(k) || 0) + 1);
+                  });
+                  const entries = [...m.entries()];
+                  const labels = entries.map(([k]) => k).join("\n");
+                  const nums = entries.map(([, v]) => String(v)).join("\n");
+                  return [
+                    [
+                      1,
+                      labels || "Giảng dạy",
+                      "",
+                      nums || data.length,
+                      "",
+                      "",
+                      "",
+                    ],
+                    [2, "Kiêm nhiệm", "", concurrent, "", "", ""],
+                    ["", "", "", "", "", "", ""],
+                    ["", "", "", "", "", "", ""],
+                  ];
+                })(),
         },
         {
           range: "B25:H25",
@@ -6422,7 +7195,10 @@ async function exportSelectedWeek1To35ToGoogleSheet(options = {}) {
         return !m || Number(m[1]) < r(12 + summaryShift);
       });
       weekRows.push(
-        { range: `B${r(12 + summaryShift)}`, values: [[`Tổng số: ${data.length} tiết`]] },
+        {
+          range: `B${r(12 + summaryShift)}`,
+          values: [[`Tổng số: ${data.length} tiết`]],
+        },
         { range: `B${r(13 + summaryShift)}`, values: [["TỔNG HỢP"]] },
         {
           range: `B${r(14 + summaryShift)}:H${r(14 + summaryShift)}`,
@@ -6432,21 +7208,44 @@ async function exportSelectedWeek1To35ToGoogleSheet(options = {}) {
         },
         {
           range: `B${r(15 + summaryShift)}:H${r(18 + summaryShift)}`,
-          values: normalizeTeacherName(clean(selectedTeacher || TEACHER)) === normalizeTeacherName(TEACHER)
-            ? [
-                [1, "Tin học", "", counts["Tin học"], "", "", ""],
-                [2, "Công nghệ", "", counts["Công nghệ"], "", "", ""],
-                [3, "Kiêm nhiệm", "", concurrent, "", "", ""],
-                [4, "Đạo đức", "", counts["Đạo đức"], "", "", ""],
-              ]
-            : (() => {
-                const m = new Map();
-                data.forEach((x) => { const k = clean(normalizeSubjectForPlan(x?.monHoc || x?.plan?.subject || "")) || "Môn học"; m.set(k, (m.get(k) || 0) + 1); });
-                const entries = [...m.entries()];
-                const labels = entries.map(([k]) => k).join("\n");
-                const nums = entries.map(([,v]) => String(v)).join("\n");
-                return [[1, labels || "Giảng dạy", "", nums || data.length, "", "", ""], [2, "Kiêm nhiệm", "", concurrent, "", "", ""], ["", "", "", "", "", "", ""], ["", "", "", "", "", "", ""]];
-              })(),
+          values:
+            normalizeTeacherName(clean(selectedTeacher || TEACHER)) ===
+            normalizeTeacherName(TEACHER)
+              ? [
+                  [1, "Tin học", "", counts["Tin học"], "", "", ""],
+                  [2, "Công nghệ", "", counts["Công nghệ"], "", "", ""],
+                  [3, "Kiêm nhiệm", "", concurrent, "", "", ""],
+                  [4, "Đạo đức", "", counts["Đạo đức"], "", "", ""],
+                ]
+              : (() => {
+                  const m = new Map();
+                  data.forEach((x) => {
+                    const k =
+                      clean(
+                        normalizeSubjectForPlan(
+                          x?.monHoc || x?.plan?.subject || "",
+                        ),
+                      ) || "Môn học";
+                    m.set(k, (m.get(k) || 0) + 1);
+                  });
+                  const entries = [...m.entries()];
+                  const labels = entries.map(([k]) => k).join("\n");
+                  const nums = entries.map(([, v]) => String(v)).join("\n");
+                  return [
+                    [
+                      1,
+                      labels || "Giảng dạy",
+                      "",
+                      nums || data.length,
+                      "",
+                      "",
+                      "",
+                    ],
+                    [2, "Kiêm nhiệm", "", concurrent, "", "", ""],
+                    ["", "", "", "", "", "", ""],
+                    ["", "", "", "", "", "", ""],
+                  ];
+                })(),
         },
         {
           range: `B${r(19 + summaryShift)}:H${r(19 + summaryShift)}`,
@@ -6674,7 +7473,12 @@ async function exportSelectedWeek1To35ToGoogleSheet(options = {}) {
       );
     if (multiTeacherSheet) {
       const summarySubjects = new Set(
-        data.map((x) => clean(normalizeSubjectForPlan(x?.monHoc || x?.plan?.subject || "")) || "Môn học"),
+        data.map(
+          (x) =>
+            clean(
+              normalizeSubjectForPlan(x?.monHoc || x?.plan?.subject || ""),
+            ) || "Môn học",
+        ),
       );
       const visibleLines = Math.max(1, summarySubjects.size);
       themeReq.push({
@@ -7064,7 +7868,11 @@ function withOutputWeek(week, fn) {
   try {
     if (sel) sel.value = String(week);
     const saved = effectiveScheduleForWeek(week);
-    allLessons = saved ? sortSchedule(applyHomeroomTeachers([...lessonsForSelectedTeacher(saved)])) : [];
+    allLessons = saved
+      ? sortSchedule(
+          applyHomeroomTeachers([...lessonsForSelectedTeacher(saved)]),
+        )
+      : [];
     meta = saved
       ? { ...saved, lessons: allLessons }
       : { file: "", sheets: [], counts: {}, errors: [] };
@@ -7563,22 +8371,33 @@ enhanceOutputPreviewMultiWeek = function () {
 // BƯỚC 5.6.2B.4B - Khôi phục thanh Xem trước sau khi nguồn PPCT chung chuyển sang bất đồng bộ.
 // Giữ nguyên TKB đa giáo viên và PPCT chung; không dùng dòng Cộng làm chuẩn.
 async function withOutputWeekAsync561B4B(week, fn) {
-  const sel = $("weekSelect"), oldWeek = sel?.value, oldLessons = allLessons, oldMeta = meta;
+  const sel = $("weekSelect"),
+    oldWeek = sel?.value,
+    oldLessons = allLessons,
+    oldMeta = meta;
   try {
     if (sel) sel.value = String(week);
     const saved = effectiveScheduleForWeek(week);
-    allLessons = saved ? sortSchedule(applyHomeroomTeachers([...lessonsForSelectedTeacher(saved)])) : [];
-    meta = saved ? { ...saved, lessons: allLessons } : { file: "", sheets: [], counts: {}, errors: [] };
+    allLessons = saved
+      ? sortSchedule(
+          applyHomeroomTeachers([...lessonsForSelectedTeacher(saved)]),
+        )
+      : [];
+    meta = saved
+      ? { ...saved, lessons: allLessons }
+      : { file: "", sheets: [], counts: {}, errors: [] };
     applyLessonPlan();
     return await fn();
   } finally {
-    allLessons = oldLessons; meta = oldMeta;
+    allLessons = oldLessons;
+    meta = oldMeta;
     if (sel) sel.value = oldWeek;
     applyLessonPlan();
   }
 }
 async function renderSharedCurriculumWeeks561B4B(modal, weeks) {
-  const chosen = normalizeOutputWeeks(weeks), packets = [];
+  const chosen = normalizeOutputWeeks(weeks),
+    packets = [];
   for (const week of chosen) {
     const packet = await withOutputWeekAsync561B4B(week, async () => {
       const data = await sharedCurriculumPreviewData();
@@ -7588,9 +8407,11 @@ async function renderSharedCurriculumWeeks561B4B(modal, weeks) {
   }
   if (!modal?.isConnected) return;
   const body = modal.querySelector(".output-preview-scroll");
-  if (body) body.innerHTML = `<div class="multi-week-stack">${packets.map((p) => `<div class="multi-week-card" data-week="${p.week}">${p.html || `<div class="preview-no-lessons">Tuần ${p.week}: chưa có dữ liệu.</div>`}</div>`).join("")}</div>`;
+  if (body)
+    body.innerHTML = `<div class="multi-week-stack">${packets.map((p) => `<div class="multi-week-card" data-week="${p.week}">${p.html || `<div class="preview-no-lessons">Tuần ${p.week}: chưa có dữ liệu.</div>`}</div>`).join("")}</div>`;
   const title = modal.querySelector(".output-preview-bar>b");
-  if (title) title.textContent = `XEM TRƯỚC PHỤ LỤC 1.4 · ${outputWeeksLabel(chosen)}`;
+  if (title)
+    title.textContent = `XEM TRƯỚC PHỤ LỤC 1.4 · ${outputWeeksLabel(chosen)}`;
   const edit = modal.querySelector(".preview-edit");
   if (edit) edit.style.display = chosen.length === 1 ? "" : "none";
   const wb = modal.querySelector(".preview-weeks");
@@ -7619,20 +8440,29 @@ function restorePreviewToolbar561B4B(modal) {
   let weeksBtn = bar.querySelector(".preview-weeks");
   if (!weeksBtn) {
     weeksBtn = document.createElement("button");
-    weeksBtn.type = "button"; weeksBtn.className = "preview-weeks";
+    weeksBtn.type = "button";
+    weeksBtn.className = "preview-weeks";
     bar.insertBefore(weeksBtn, bar.firstChild);
   }
   const cur = Math.max(1, Math.min(35, Number($("weekSelect")?.value || 1)));
   multiOutputWeeks = [cur];
   weeksBtn.textContent = "Chọn tuần (1)";
-  weeksBtn.onclick = () => openMultiWeekPicker(async (weeks) => {
-    multiOutputWeeks = normalizeOutputWeeks(weeks);
-    await renderSharedCurriculumWeeks561B4B(modal, multiOutputWeeks);
-  });
-  const excel = modal.querySelector(".preview-export-excel"), pdf = modal.querySelector(".preview-export-pdf"), print = modal.querySelector(".preview-print");
+  weeksBtn.onclick = () =>
+    openMultiWeekPicker(async (weeks) => {
+      multiOutputWeeks = normalizeOutputWeeks(weeks);
+      await renderSharedCurriculumWeeks561B4B(modal, multiOutputWeeks);
+    });
+  const excel = modal.querySelector(".preview-export-excel"),
+    pdf = modal.querySelector(".preview-export-pdf"),
+    print = modal.querySelector(".preview-print");
   if (excel) excel.onclick = () => exportExcelWeeks(currentOutputWeeks());
   if (pdf) pdf.onclick = () => exportPDFWeeks(currentOutputWeeks());
-  if (print) print.onclick = () => { const weeks = currentOutputWeeks(); modal.remove(); printScheduleWeeks(weeks); };
+  if (print)
+    print.onclick = () => {
+      const weeks = currentOutputWeeks();
+      modal.remove();
+      printScheduleWeeks(weeks);
+    };
   syncMultiWeekGoogleSheetButton(modal);
 }
 const openOutputPreviewBefore561B4B = openOutputPreview;
@@ -7662,7 +8492,9 @@ exportExcel = async function () {
     return exportExcelBefore561B5A();
   } catch (err) {
     console.error("[TKB] Không đọc được PPCT chung khi xuất Excel", err);
-    return alert(`Chưa đọc được kho PPCT chung để xuất Excel: ${err?.message || err}`);
+    return alert(
+      `Chưa đọc được kho PPCT chung để xuất Excel: ${err?.message || err}`,
+    );
   } finally {
     excelSharedCurriculumData561B5A = null;
   }
@@ -7674,14 +8506,23 @@ exportExcelWeeks = async function (weeks) {
     return withOutputWeekAsync561B4B(chosen[0], () => exportExcel());
   if (typeof XLSX === "undefined")
     return alert("Không tải được thư viện xuất Excel.");
-  const out = XLSX.utils.book_new(), originalWrite = XLSX.writeFile, missing = [], sourceRows = [];
+  const out = XLSX.utils.book_new(),
+    originalWrite = XLSX.writeFile,
+    missing = [],
+    sourceRows = [];
   try {
     for (const week of chosen) {
       let captured = null;
-      XLSX.writeFile = (wb) => { captured = wb; };
+      XLSX.writeFile = (wb) => {
+        captured = wb;
+      };
       await withOutputWeekAsync561B4B(week, () => exportExcel());
-      if (!captured) { missing.push(week); continue; }
-      const s1 = captured.Sheets[captured.SheetNames[0]], s2 = captured.Sheets[captured.SheetNames[1]];
+      if (!captured) {
+        missing.push(week);
+        continue;
+      }
+      const s1 = captured.Sheets[captured.SheetNames[0]],
+        s2 = captured.Sheets[captured.SheetNames[1]];
       if (s1) XLSX.utils.book_append_sheet(out, s1, `Tuần ${week}`);
       if (s2) {
         const a = XLSX.utils.sheet_to_json(s2, { header: 1, defval: "" });
@@ -7691,25 +8532,76 @@ exportExcelWeeks = async function (weeks) {
         }
       }
     }
-  } finally { XLSX.writeFile = originalWrite; }
+  } finally {
+    XLSX.writeFile = originalWrite;
+  }
   if (sourceRows.length) {
     const src = XLSX.utils.aoa_to_sheet(sourceRows);
-    src["!cols"] = [{wch:8},{wch:9},{wch:8},{wch:9},{wch:13},{wch:22},{wch:11},{wch:10},{wch:11},{wch:12},{wch:18},{wch:10},{wch:18},{wch:22},{wch:48}];
+    src["!cols"] = [
+      { wch: 8 },
+      { wch: 9 },
+      { wch: 8 },
+      { wch: 9 },
+      { wch: 13 },
+      { wch: 22 },
+      { wch: 11 },
+      { wch: 10 },
+      { wch: 11 },
+      { wch: 12 },
+      { wch: 18 },
+      { wch: 10 },
+      { wch: 18 },
+      { wch: 22 },
+      { wch: 48 },
+    ];
     src["!autofilter"] = { ref: `A1:O${sourceRows.length}` };
-    const green="0B7A53", white="FFFFFF", grid="9BC9AE";
-    for (let R=0; R<sourceRows.length; R++) for (let C=0; C<15; C++) {
-      const a=XLSX.utils.encode_cell({r:R,c:C}); if (!src[a]) continue;
-      src[a].s={font:{name:"Times New Roman",sz:11,bold:R===0,color:{rgb:R===0?white:"17382B"}},fill:R===0?{patternType:"solid",fgColor:{rgb:green}}:undefined,alignment:{horizontal:R===0?"center":"left",vertical:"center",wrapText:true},border:{top:{style:"thin",color:{rgb:grid}},bottom:{style:"thin",color:{rgb:grid}},left:{style:"thin",color:{rgb:grid}},right:{style:"thin",color:{rgb:grid}}}};
-    }
+    const green = "0B7A53",
+      white = "FFFFFF",
+      grid = "9BC9AE";
+    for (let R = 0; R < sourceRows.length; R++)
+      for (let C = 0; C < 15; C++) {
+        const a = XLSX.utils.encode_cell({ r: R, c: C });
+        if (!src[a]) continue;
+        src[a].s = {
+          font: {
+            name: "Times New Roman",
+            sz: 11,
+            bold: R === 0,
+            color: { rgb: R === 0 ? white : "17382B" },
+          },
+          fill:
+            R === 0
+              ? { patternType: "solid", fgColor: { rgb: green } }
+              : undefined,
+          alignment: {
+            horizontal: R === 0 ? "center" : "left",
+            vertical: "center",
+            wrapText: true,
+          },
+          border: {
+            top: { style: "thin", color: { rgb: grid } },
+            bottom: { style: "thin", color: { rgb: grid } },
+            left: { style: "thin", color: { rgb: grid } },
+            right: { style: "thin", color: { rgb: grid } },
+          },
+        };
+      }
     XLSX.utils.book_append_sheet(out, src, "Đối chiếu nguồn");
   }
-  if (!out.SheetNames.length) return alert("Không có dữ liệu để xuất Excel cho các tuần đã chọn.");
-  const first=chosen[0], last=chosen[chosen.length-1], teacher=outputTeacherFileKey();
-  const name=chosen.length===last-first+1
-    ? `TKB_CA_NHAN_${teacher}_TUAN_${first}-${last}.xlsx`
-    : `TKB_CA_NHAN_${teacher}_${chosen.map((w)=>`T${w}`).join("_")}.xlsx`;
-  originalWrite(out,name,{cellStyles:true});
-  if (missing.length) alert(`Đã xuất các tuần có dữ liệu. Tuần chưa có dữ liệu: ${missing.join(", ")}.`);
+  if (!out.SheetNames.length)
+    return alert("Không có dữ liệu để xuất Excel cho các tuần đã chọn.");
+  const first = chosen[0],
+    last = chosen[chosen.length - 1],
+    teacher = outputTeacherFileKey();
+  const name =
+    chosen.length === last - first + 1
+      ? `TKB_CA_NHAN_${teacher}_TUAN_${first}-${last}.xlsx`
+      : `TKB_CA_NHAN_${teacher}_${chosen.map((w) => `T${w}`).join("_")}.xlsx`;
+  originalWrite(out, name, { cellStyles: true });
+  if (missing.length)
+    alert(
+      `Đã xuất các tuần có dữ liệu. Tuần chưa có dữ liệu: ${missing.join(", ")}.`,
+    );
 };
 const excelBtn561B5A = document.getElementById("excelBtn");
 if (excelBtn561B5A) excelBtn561B5A.onclick = () => exportExcel();
@@ -7717,7 +8609,8 @@ if (excelBtn561B5A) excelBtn561B5A.onclick = () => exportExcel();
 // BƯỚC 5.6.2B.5B - PDF + In dùng kho PPCT chung giống Xem trước/Excel.
 // Chỉ thay nguồn dữ liệu cho PDF/In; không thay parser TKB, Xem trước, Excel hay Google Sheet.
 async function sharedCurriculumPackets561B5B(weeks) {
-  const chosen = normalizeOutputWeeks(weeks), packets = [];
+  const chosen = normalizeOutputWeeks(weeks),
+    packets = [];
   for (const week of chosen) {
     const packet = await withOutputWeekAsync561B4B(week, async () => {
       const data = await sharedCurriculumPreviewData();
@@ -7736,12 +8629,17 @@ exportPDFWeeks = async function (weeks) {
   ensureFormalOutputStyles();
   let packets;
   try {
-    packets = (await sharedCurriculumPackets561B5B(chosen)).filter((p) => p.data.length);
+    packets = (await sharedCurriculumPackets561B5B(chosen)).filter(
+      (p) => p.data.length,
+    );
   } catch (err) {
     console.error("[TKB] Không đọc được PPCT chung khi xuất PDF", err);
-    return alert(`Chưa đọc được kho PPCT chung để xuất PDF: ${err?.message || err}`);
+    return alert(
+      `Chưa đọc được kho PPCT chung để xuất PDF: ${err?.message || err}`,
+    );
   }
-  if (!packets.length) return alert("Không có dữ liệu để xuất PDF cho các tuần đã chọn.");
+  if (!packets.length)
+    return alert("Không có dữ liệu để xuất PDF cho các tuần đã chọn.");
   const holder = document.createElement("div");
   holder.className = "formal-holder";
   holder.innerHTML = packets.map((p) => p.html).join("");
@@ -7752,10 +8650,13 @@ exportPDFWeeks = async function (weeks) {
       state = { count: 0 };
     for (const target of holder.querySelectorAll(".formal-output"))
       await addFormalElementToPdf(pdf, target, state);
-    const first = chosen[0], last = chosen[chosen.length - 1], teacher = outputTeacherFileKey();
-    const range = chosen.length === last - first + 1
-      ? `TUAN_${first}-${last}`
-      : chosen.map((w) => `T${w}`).join("_");
+    const first = chosen[0],
+      last = chosen[chosen.length - 1],
+      teacher = outputTeacherFileKey();
+    const range =
+      chosen.length === last - first + 1
+        ? `TUAN_${first}-${last}`
+        : chosen.map((w) => `T${w}`).join("_");
     pdf.save(`PHU_LUC_1_4_${teacher}_${range}.pdf`);
   } finally {
     holder.remove();
@@ -7769,17 +8670,21 @@ printScheduleWeeks = async function (weeks) {
   ensureMultiOutputStyles();
   let packets;
   try {
-    packets = (await sharedCurriculumPackets561B5B(chosen)).filter((p) => p.data.length);
+    packets = (await sharedCurriculumPackets561B5B(chosen)).filter(
+      (p) => p.data.length,
+    );
   } catch (err) {
     console.error("[TKB] Không đọc được PPCT chung khi in", err);
     return alert(`Chưa đọc được kho PPCT chung để in: ${err?.message || err}`);
   }
-  if (!packets.length) return alert("Không có dữ liệu để in cho các tuần đã chọn.");
+  if (!packets.length)
+    return alert("Không có dữ liệu để in cho các tuần đã chọn.");
   const holder = document.createElement("div");
   holder.className = "formal-holder print-formal";
   holder.innerHTML = packets.map((p) => p.html).join("");
   holder.querySelectorAll(".formal-summary tr:last-child").forEach((row) => {
-    const th = row.querySelectorAll("th"), v = th[2]?.textContent || "";
+    const th = row.querySelectorAll("th"),
+      v = th[2]?.textContent || "";
     row.innerHTML = `<th></th><th>Tổng số</th><th>${esc(v)}</th><th></th>`;
   });
   document.body.appendChild(holder);
@@ -7796,28 +8701,38 @@ printScheduleWeeks = async function (weeks) {
 
 // Nút ngoài giao diện chính cũng dùng đúng PPCT chung.
 const pdfBtn561B5B = document.getElementById("pdfBtn");
-if (pdfBtn561B5B) pdfBtn561B5B.onclick = () => exportPDFWeeks([Number($("weekSelect")?.value || 1)]);
+if (pdfBtn561B5B)
+  pdfBtn561B5B.onclick = () =>
+    exportPDFWeeks([Number($("weekSelect")?.value || 1)]);
 const printBtn561B5B = document.getElementById("printBtn");
-if (printBtn561B5B) printBtn561B5B.onclick = () => printScheduleWeeks([Number($("weekSelect")?.value || 1)]);
+if (printBtn561B5B)
+  printBtn561B5B.onclick = () =>
+    printScheduleWeeks([Number($("weekSelect")?.value || 1)]);
 
 // BƯỚC 5.6.2B.7B - Đồng bộ bộ lọc môn hợp lệ cho Excel/PDF/In.
 // Xem trước đã dùng isValidOutputSubject(); các luồng xuất phải dùng cùng một nguồn đã lọc.
 function validFormalOutputData561B7B(data) {
-  return (Array.isArray(data) ? data : []).filter((x) => isValidOutputSubject(x?.monHoc));
+  return (Array.isArray(data) ? data : []).filter((x) =>
+    isValidOutputSubject(x?.monHoc),
+  );
 }
 
 // Excel: dữ liệu PPCT chung đưa vào hàm xuất cũ phải được lọc trước khi tính Tổng số/TỔNG HỢP.
 const exportExcelBefore561B7B = exportExcel;
 exportExcel = async function () {
   try {
-    const data = validFormalOutputData561B7B(await sharedCurriculumPreviewData());
+    const data = validFormalOutputData561B7B(
+      await sharedCurriculumPreviewData(),
+    );
     if (!data.length) return alert("Không có dữ liệu hợp lệ để xuất.");
     excelSharedCurriculumData561B5A = data;
     // Gọi thẳng hàm Excel gốc trước wrapper 5A để tránh wrapper 5A nạp lại dữ liệu chưa lọc.
     return exportExcelBefore561B5A();
   } catch (err) {
     console.error("[TKB] Không đọc được PPCT chung khi xuất Excel", err);
-    return alert(`Chưa đọc được kho PPCT chung để xuất Excel: ${err?.message || err}`);
+    return alert(
+      `Chưa đọc được kho PPCT chung để xuất Excel: ${err?.message || err}`,
+    );
   } finally {
     excelSharedCurriculumData561B5A = null;
   }
@@ -7825,10 +8740,13 @@ exportExcel = async function () {
 
 // PDF/In: packet dùng đúng cùng dữ liệu hợp lệ như Xem trước.
 sharedCurriculumPackets561B5B = async function (weeks) {
-  const chosen = normalizeOutputWeeks(weeks), packets = [];
+  const chosen = normalizeOutputWeeks(weeks),
+    packets = [];
   for (const week of chosen) {
     const packet = await withOutputWeekAsync561B4B(week, async () => {
-      const data = validFormalOutputData561B7B(await sharedCurriculumPreviewData());
+      const data = validFormalOutputData561B7B(
+        await sharedCurriculumPreviewData(),
+      );
       return { week, data, html: data.length ? buildFormalOutput(data) : "" };
     });
     packets.push(packet);
@@ -7842,54 +8760,103 @@ if (excelBtn561B7B) excelBtn561B7B.onclick = () => exportExcel();
 
 // BƯỚC 5.6.2B.9C.1 - Google Sheet cá nhân thử nghiệm đa giáo viên.
 // Tách hoàn toàn khỏi mapping Google Sheet công vụ hiện tại.
-const MULTI_TEACHER_TEST_SPREADSHEET_ID = "1tIFyPOlJ8z4Eo5ml1eQLrOhPMvRUS5CnrG7DBk5jOo0";
+const MULTI_TEACHER_TEST_SPREADSHEET_ID =
+  "1tIFyPOlJ8z4Eo5ml1eQLrOhPMvRUS5CnrG7DBk5jOo0";
 function multiTeacherTestSheetNames() {
   const names = [...new Set((teacherCatalog || []).map(clean).filter(Boolean))];
-  if (selectedTeacher && !names.some((x) => normalizeTeacherName(x) === normalizeTeacherName(selectedTeacher))) {
+  if (
+    selectedTeacher &&
+    !names.some(
+      (x) => normalizeTeacherName(x) === normalizeTeacherName(selectedTeacher),
+    )
+  ) {
     names.push(selectedTeacher);
   }
   return names.sort((a, b) => a.localeCompare(b, "vi"));
 }
 async function initializeMultiTeacherTestGoogleSheet() {
-  const btn = document.querySelector("#outputPreviewModal .preview-google-multi-init");
+  const btn = document.querySelector(
+    "#outputPreviewModal .preview-google-multi-init",
+  );
   const oldText = btn?.textContent;
   try {
-    if (btn) { btn.disabled = true; btn.textContent = "Đang khởi tạo..."; }
+    if (btn) {
+      btn.disabled = true;
+      btn.textContent = "Đang khởi tạo...";
+    }
     const token = await getGoogleSheetsReadOnlyToken();
-    const headers = { Authorization: `Bearer ${token}`, "Content-Type": "application/json" };
+    const headers = {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    };
     const base = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(MULTI_TEACHER_TEST_SPREADSHEET_ID)}`;
-    let meta = await gsJson(`${base}?fields=properties.title,sheets.properties(sheetId,title,index)`, { headers });
+    let meta = await gsJson(
+      `${base}?fields=properties.title,sheets.properties(sheetId,title,index)`,
+      { headers },
+    );
     const wanted = multiTeacherTestSheetNames();
-    if (!wanted.length) throw new Error("Chưa có danh sách giáo viên để khởi tạo.");
-    const existingKeys = new Set((meta.sheets || []).map((s) => googleSheetNameKey(s?.properties?.title)));
+    if (!wanted.length)
+      throw new Error("Chưa có danh sách giáo viên để khởi tạo.");
+    const existingKeys = new Set(
+      (meta.sheets || []).map((s) => googleSheetNameKey(s?.properties?.title)),
+    );
     const requests = [];
     for (const name of wanted) {
       if (!existingKeys.has(googleSheetNameKey(name))) {
-        requests.push({ addSheet: { properties: { title: name, gridProperties: { rowCount: 1000, columnCount: 12 } } } });
+        requests.push({
+          addSheet: {
+            properties: {
+              title: name,
+              gridProperties: { rowCount: 1000, columnCount: 12 },
+            },
+          },
+        });
       }
     }
     if (requests.length) {
-      await gsJson(`${base}:batchUpdate`, { method: "POST", headers, body: JSON.stringify({ requests }) });
+      await gsJson(`${base}:batchUpdate`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ requests }),
+      });
     }
-    meta = await gsJson(`${base}?fields=properties.title,sheets.properties(sheetId,title,index)`, { headers });
-    const found = wanted.filter((name) => (meta.sheets || []).some((s) => googleSheetNameKey(s?.properties?.title) === googleSheetNameKey(name)));
-    alert(`KHỞI TẠO GOOGLE SHEET ĐA GIÁO VIÊN THÀNH CÔNG\n\nTệp: ${meta.properties?.title || "Google Sheet thử nghiệm"}\nĐã có: ${found.length}/${wanted.length} tab giáo viên.\n\nĐây là file cá nhân thử nghiệm; Google Sheet công vụ của Đậm không bị thay đổi.`);
+    meta = await gsJson(
+      `${base}?fields=properties.title,sheets.properties(sheetId,title,index)`,
+      { headers },
+    );
+    const found = wanted.filter((name) =>
+      (meta.sheets || []).some(
+        (s) =>
+          googleSheetNameKey(s?.properties?.title) === googleSheetNameKey(name),
+      ),
+    );
+    alert(
+      `KHỞI TẠO GOOGLE SHEET ĐA GIÁO VIÊN THÀNH CÔNG\n\nTệp: ${meta.properties?.title || "Google Sheet thử nghiệm"}\nĐã có: ${found.length}/${wanted.length} tab giáo viên.\n\nĐây là file cá nhân thử nghiệm; Google Sheet công vụ của Đậm không bị thay đổi.`,
+    );
   } catch (err) {
     console.error("Khởi tạo Google Sheet đa GV:", err);
-    alert(`Chưa khởi tạo được Google Sheet đa giáo viên.\n\n${err?.message || err}`);
+    alert(
+      `Chưa khởi tạo được Google Sheet đa giáo viên.\n\n${err?.message || err}`,
+    );
   } finally {
-    if (btn) { btn.disabled = false; btn.textContent = oldText || "Khởi tạo Sheet đa GV"; }
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = oldText || "Khởi tạo Sheet đa GV";
+    }
   }
 }
 function ensureMultiTeacherTestGoogleSheetButton() {
-  const bar = document.querySelector("#outputPreviewModal .output-preview-bar>div");
+  const bar = document.querySelector(
+    "#outputPreviewModal .output-preview-bar>div",
+  );
   if (!bar || bar.querySelector(".preview-google-multi-init")) return;
   const close = bar.querySelector(".preview-close");
   const b = document.createElement("button");
   b.type = "button";
   b.className = "preview-google-multi-init";
   b.textContent = "Khởi tạo Sheet đa GV";
-  b.title = "Tạo tab riêng cho toàn bộ giáo viên trong Google Sheet cá nhân thử nghiệm";
+  b.title =
+    "Tạo tab riêng cho toàn bộ giáo viên trong Google Sheet cá nhân thử nghiệm";
   b.onclick = initializeMultiTeacherTestGoogleSheet;
   bar.insertBefore(b, close || null);
 }
@@ -7899,17 +8866,23 @@ openOutputPreview = async function () {
   ensureMultiTeacherTestGoogleSheetButton();
 };
 const previewBtnMultiTeacherTestInit = document.getElementById("previewBtn");
-if (previewBtnMultiTeacherTestInit) previewBtnMultiTeacherTestInit.onclick = openOutputPreview;
+if (previewBtnMultiTeacherTestInit)
+  previewBtnMultiTeacherTestInit.onclick = openOutputPreview;
 
 // BƯỚC 5.6.2B.9C.2A - Đồng bộ kiểm tra trước khi ghi Google Sheet với kho PPCT chung.
 // Chỉ thay nguồn dữ liệu trong lúc ghi: dùng đúng dữ liệu PPCT đang hiển thị ở Xem trước.
 // Không thay cấu hình Google Sheet công vụ, không thay parser TKB, tổng số hay kiêm nhiệm.
-const exportSelectedWeek1To35ToGoogleSheetBefore562B9C2A = exportSelectedWeek1To35ToGoogleSheet;
+const exportSelectedWeek1To35ToGoogleSheetBefore562B9C2A =
+  exportSelectedWeek1To35ToGoogleSheet;
 exportSelectedWeek1To35ToGoogleSheet = async function (options = {}) {
   try {
-    const sharedData = validFormalOutputData561B7B(await sharedCurriculumPreviewData());
+    const sharedData = validFormalOutputData561B7B(
+      await sharedCurriculumPreviewData(),
+    );
     if (!sharedData.length) {
-      throw new Error(`Tuần ${Number(options.week || $("weekSelect")?.value || 0) || ""} không có dữ liệu PPCT hợp lệ để ghi.`);
+      throw new Error(
+        `Tuần ${Number(options.week || $("weekSelect")?.value || 0) || ""} không có dữ liệu PPCT hợp lệ để ghi.`,
+      );
     }
     // outputScheduleData() đã có cơ chế ưu tiên biến tạm này ở Bước 5.6.2B.5A.
     // Tái sử dụng để bộ kiểm tra noTitle và dữ liệu ghi nhìn cùng một nguồn PPCT với Preview/Excel/PDF/In.
@@ -7918,22 +8891,33 @@ exportSelectedWeek1To35ToGoogleSheet = async function (options = {}) {
   } catch (err) {
     console.error("[TKB] 5.6.2B.9C.2A - Google Sheet/PPCT chung:", err);
     if (options.throwOnError) throw err;
-    alert(`CHƯA GHI ĐƯỢC TUẦN ${Number(options.week || $("weekSelect")?.value || 0) || ""}\n\n${err?.message || err}`);
+    alert(
+      `CHƯA GHI ĐƯỢC TUẦN ${Number(options.week || $("weekSelect")?.value || 0) || ""}\n\n${err?.message || err}`,
+    );
     return false;
   } finally {
     excelSharedCurriculumData561B5A = null;
   }
 };
 
-
 // BƯỚC 5.6.2B.9C.2C - Google Sheet đa GV dùng trực tiếp toàn bộ tiết PPCT đã hiển thị trên Preview; không nhận diện lại theo 3 môn của Đậm.
 // BƯỚC 5.6.2B.9C.2B - Giáo viên đang chọn ghi đúng tab trong Google Sheet cá nhân đa GV.
 // Đậm tiếp tục dùng Google Sheet công vụ đang Đạt; giáo viên khác dùng file cá nhân thử nghiệm.
 async function ensureMultiTeacherPersonalTemplate562B9C2B(token) {
-  const headers = { Authorization: `Bearer ${token}`, "Content-Type": "application/json" };
+  const headers = {
+    Authorization: `Bearer ${token}`,
+    "Content-Type": "application/json",
+  };
   const personalBase = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(MULTI_TEACHER_TEST_SPREADSHEET_ID)}`;
-  let personalMeta = await gsJson(`${personalBase}?fields=sheets.properties(sheetId,title,hidden)`, { headers });
-  let tpl = (personalMeta.sheets || []).find((s) => googleSheetNameKey(s?.properties?.title) === googleSheetNameKey(GOOGLE_SHEETS_TEMPLATE_NAME));
+  let personalMeta = await gsJson(
+    `${personalBase}?fields=sheets.properties(sheetId,title,hidden)`,
+    { headers },
+  );
+  let tpl = (personalMeta.sheets || []).find(
+    (s) =>
+      googleSheetNameKey(s?.properties?.title) ===
+      googleSheetNameKey(GOOGLE_SHEETS_TEMPLATE_NAME),
+  );
   if (tpl?.properties?.sheetId) return tpl.properties;
 
   // Tạo mẫu một lần từ chính Google Sheet công vụ đã Đạt, không sửa dữ liệu công vụ.
@@ -7949,34 +8933,75 @@ async function ensureMultiTeacherPersonalTemplate562B9C2B(token) {
   );
   const copied = await gsJson(
     `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(officialSpreadsheetId)}/sheets/${Number(officialTpl.sheetId)}:copyTo`,
-    { method: "POST", headers, body: JSON.stringify({ destinationSpreadsheetId: MULTI_TEACHER_TEST_SPREADSHEET_ID }) },
+    {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        destinationSpreadsheetId: MULTI_TEACHER_TEST_SPREADSHEET_ID,
+      }),
+    },
   );
   const copiedId = Number(copied?.sheetId);
-  if (!Number.isFinite(copiedId)) throw new Error("Không sao chép được mẫu định dạng sang Google Sheet đa giáo viên.");
+  if (!Number.isFinite(copiedId))
+    throw new Error(
+      "Không sao chép được mẫu định dạng sang Google Sheet đa giáo viên.",
+    );
   await gsJson(`${personalBase}:batchUpdate`, {
-    method: "POST", headers,
-    body: JSON.stringify({ requests: [{ updateSheetProperties: {
-      properties: { sheetId: copiedId, title: GOOGLE_SHEETS_TEMPLATE_NAME, hidden: true },
-      fields: "title,hidden",
-    } }] }),
+    method: "POST",
+    headers,
+    body: JSON.stringify({
+      requests: [
+        {
+          updateSheetProperties: {
+            properties: {
+              sheetId: copiedId,
+              title: GOOGLE_SHEETS_TEMPLATE_NAME,
+              hidden: true,
+            },
+            fields: "title,hidden",
+          },
+        },
+      ],
+    }),
   });
-  return { sheetId: copiedId, title: GOOGLE_SHEETS_TEMPLATE_NAME, hidden: true };
+  return {
+    sheetId: copiedId,
+    title: GOOGLE_SHEETS_TEMPLATE_NAME,
+    hidden: true,
+  };
 }
 
 async function multiTeacherPersonalTarget562B9C2B(token, teacherName) {
-  const headers = { Authorization: `Bearer ${token}`, "Content-Type": "application/json" };
+  const headers = {
+    Authorization: `Bearer ${token}`,
+    "Content-Type": "application/json",
+  };
   const base = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(MULTI_TEACHER_TEST_SPREADSHEET_ID)}`;
-  const meta = await gsJson(`${base}?fields=properties.title,sheets.properties(sheetId,title,hidden,gridProperties)`, { headers });
+  const meta = await gsJson(
+    `${base}?fields=properties.title,sheets.properties(sheetId,title,hidden,gridProperties)`,
+    { headers },
+  );
   const key = googleSheetNameKey(teacherName);
-  const sheet = (meta.sheets || []).find((s) => googleSheetNameKey(s?.properties?.title) === key);
-  if (!sheet?.properties?.sheetId) throw new Error(`Chưa tìm thấy tab giáo viên "${teacherName}" trong Google Sheet đa giáo viên.`);
-  return { spreadsheetId: MULTI_TEACHER_TEST_SPREADSHEET_ID, sheetName: sheet.properties.title, sheetId: Number(sheet.properties.sheetId) };
+  const sheet = (meta.sheets || []).find(
+    (s) => googleSheetNameKey(s?.properties?.title) === key,
+  );
+  if (!sheet?.properties?.sheetId)
+    throw new Error(
+      `Chưa tìm thấy tab giáo viên "${teacherName}" trong Google Sheet đa giáo viên.`,
+    );
+  return {
+    spreadsheetId: MULTI_TEACHER_TEST_SPREADSHEET_ID,
+    sheetName: sheet.properties.title,
+    sheetId: Number(sheet.properties.sheetId),
+  };
 }
 
-const exportSelectedWeek1To35ToGoogleSheetBefore562B9C2B = exportSelectedWeek1To35ToGoogleSheet;
+const exportSelectedWeek1To35ToGoogleSheetBefore562B9C2B =
+  exportSelectedWeek1To35ToGoogleSheet;
 exportSelectedWeek1To35ToGoogleSheet = async function (options = {}) {
   const teacherName = clean(selectedTeacher || TEACHER);
-  const isDam = normalizeTeacherName(teacherName) === normalizeTeacherName(TEACHER);
+  const isDam =
+    normalizeTeacherName(teacherName) === normalizeTeacherName(TEACHER);
   if (isDam) return exportSelectedWeek1To35ToGoogleSheetBefore562B9C2B(options);
 
   // Xin/nhận token trước; cùng token được chuyển xuống hàm ghi để không bật OAuth lần hai.
@@ -7990,7 +9015,10 @@ exportSelectedWeek1To35ToGoogleSheet = async function (options = {}) {
     GOOGLE_SHEETS_SPREADSHEET_ID = target.spreadsheetId;
     GOOGLE_SHEETS_TEACHER_NAME = target.sheetName;
     GOOGLE_SHEETS_TEACHER_GID = target.sheetId;
-    return await exportSelectedWeek1To35ToGoogleSheetBefore562B9C2B({ ...options, accessToken: token });
+    return await exportSelectedWeek1To35ToGoogleSheetBefore562B9C2B({
+      ...options,
+      accessToken: token,
+    });
   } finally {
     GOOGLE_SHEETS_SPREADSHEET_ID = oldSpreadsheetId;
     GOOGLE_SHEETS_TEACHER_NAME = oldTeacherName;
@@ -8001,10 +9029,12 @@ exportSelectedWeek1To35ToGoogleSheet = async function (options = {}) {
 // BƯỚC 5.6.2B.9C.2D - Google Sheet đa GV: Làm mới đúng tab giáo viên đang chọn.
 // Đậm giữ nguyên Google Sheet công vụ; giáo viên khác dùng file cá nhân thử nghiệm.
 const resetGoogleSheetWeekRangeBefore562B9C2D = resetGoogleSheetWeekRange;
-resetGoogleSheetWeekRange = async function(firstWeek, lastWeek) {
+resetGoogleSheetWeekRange = async function (firstWeek, lastWeek) {
   const teacherName = clean(selectedTeacher || TEACHER);
-  const isDam = normalizeTeacherName(teacherName) === normalizeTeacherName(TEACHER);
-  if (isDam) return resetGoogleSheetWeekRangeBefore562B9C2D(firstWeek, lastWeek);
+  const isDam =
+    normalizeTeacherName(teacherName) === normalizeTeacherName(TEACHER);
+  if (isDam)
+    return resetGoogleSheetWeekRangeBefore562B9C2D(firstWeek, lastWeek);
   const token = await getGoogleSheetsReadOnlyToken();
   const oldSpreadsheetId = GOOGLE_SHEETS_SPREADSHEET_ID;
   const oldTeacherName = GOOGLE_SHEETS_TEACHER_NAME;
@@ -8031,108 +9061,419 @@ resetGoogleSheetWeekRange = async function(firstWeek, lastWeek) {
 const MULTI_GS_BLOCK_ROWS_569D4 = 36;
 const MULTI_GS_FIRST_ROW_569D4 = 8;
 function multiGsWeekRange569D4(week) {
-  const startRow = MULTI_GS_FIRST_ROW_569D4 + (Number(week) - 1) * MULTI_GS_BLOCK_ROWS_569D4;
+  const startRow =
+    MULTI_GS_FIRST_ROW_569D4 + (Number(week) - 1) * MULTI_GS_BLOCK_ROWS_569D4;
   return { startRow, endRow: startRow + MULTI_GS_BLOCK_ROWS_569D4 - 1 };
 }
 function multiGsWeekDates569D4(week) {
-  const r = schoolCalendar.weeks.find((x) => Number(x.week) === Number(week)) || generateSchoolWeeks("2026-09-07", [])[Number(week)-1];
-  const start = parseLocalDate(r.start), end = parseLocalDate(r.end), days=[];
-  for (let i=0;i<5;i++){ const d=new Date(start); d.setDate(d.getDate()+i); days.push(fmtDateVN(d)); }
-  return { week:Number(week), start, end, days, fmt:(d)=>fmtDateVN(d) };
+  const r =
+    schoolCalendar.weeks.find((x) => Number(x.week) === Number(week)) ||
+    generateSchoolWeeks("2026-09-07", [])[Number(week) - 1];
+  const start = parseLocalDate(r.start),
+    end = parseLocalDate(r.end),
+    days = [];
+  for (let i = 0; i < 5; i++) {
+    const d = new Date(start);
+    d.setDate(d.getDate() + i);
+    days.push(fmtDateVN(d));
+  }
+  return { week: Number(week), start, end, days, fmt: (d) => fmtDateVN(d) };
 }
 function multiGsLessonText569D4(data, day, session, tiet) {
-  return data.filter(x => x.thu===day && normKey(x.buoi)===normKey(session) && Number(x.tiet)===Number(tiet))
-    .map(x => {
-      const sub=displayTeachingSubject(x), title=clean(x.plan?.title), pt=x.plan?.annualPeriod || x.plan?.week || x.planWeek || "";
+  return data
+    .filter(
+      (x) =>
+        x.thu === day &&
+        normKey(x.buoi) === normKey(session) &&
+        Number(x.tiet) === Number(tiet),
+    )
+    .map((x) => {
+      const sub = displayTeachingSubject(x),
+        title = clean(x.plan?.title),
+        pt = x.plan?.annualPeriod || x.plan?.week || x.planWeek || "";
       return `${sub} ${clean(x.lop)}${x.plan ? ` Tiết ${pt} - ` : " - "}${title}`.trim();
-    }).join("\n");
+    })
+    .join("\n");
 }
-async function writeMultiTeacherGoogleSheet569D4(options={}) {
-  const week=Number(options.week || $("weekSelect")?.value || 0);
-  if (!Number.isInteger(week)||week<1||week>35) throw new Error("Chỉ hỗ trợ Tuần 1–35.");
-  const data=outputScheduleData().map(x=>({...x})).filter(x=>isValidOutputSubject(x.monHoc));
+async function writeMultiTeacherGoogleSheet569D4(options = {}) {
+  const week = Number(options.week || $("weekSelect")?.value || 0);
+  if (!Number.isInteger(week) || week < 1 || week > 35)
+    throw new Error("Chỉ hỗ trợ Tuần 1–35.");
+  const data = outputScheduleData()
+    .map((x) => ({ ...x }))
+    .filter((x) => isValidOutputSubject(x.monHoc));
   if (!data.length) throw new Error(`Tuần ${week} không có tiết dạy để ghi.`);
-  const over7=data.filter(x=>Number(x.tiet)>7);
-  if (over7.length) throw new Error(`DỪNG GHI: còn ${over7.length} tiết lớn hơn Tiết 7 trong TKB nguồn. Hãy kiểm tra TKB trước khi ghi Google Sheet.`);
-  const noTitle=data.filter(x=>!clean(x.plan?.title));
-  if (noTitle.length) throw new Error(`DỪNG GHI: còn ${noTitle.length} tiết chưa ghép tên bài PPCT chung.`);
-  const teacherName=clean(selectedTeacher||TEACHER), token=options.accessToken || await getGoogleSheetsReadOnlyToken();
-  const target=await multiTeacherPersonalTarget562B9C2B(token, teacherName);
-  const headers={Authorization:`Bearer ${token}`,"Content-Type":"application/json"};
-  const base=`https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(target.spreadsheetId)}`;
-  const meta=await gsJson(`${base}?fields=sheets.properties(sheetId,title,gridProperties)`,{headers});
-  const sh=(meta.sheets||[]).find(s=>Number(s?.properties?.sheetId)===Number(target.sheetId));
-  let rowCount=Number(sh?.properties?.gridProperties?.rowCount)||1000;
-  const needed=MULTI_GS_FIRST_ROW_569D4 + 35*MULTI_GS_BLOCK_ROWS_569D4;
-  if(rowCount<needed){ await gsJson(`${base}:batchUpdate`,{method:"POST",headers,body:JSON.stringify({requests:[{appendDimension:{sheetId:target.sheetId,dimension:"ROWS",length:needed-rowCount}}]})}); }
-  const {startRow,endRow}=multiGsWeekRange569D4(week), wd=multiGsWeekDates569D4(week);
-  const subjects=[...new Set(data.map(x=>normalizeSubjectForPlan(x.monHoc)))].filter(Boolean);
-  const concurrent=getConcurrentPeriods();
-  if(subjects.length + (concurrent>0?1:0) > 16) throw new Error("TỔNG HỢP có quá nhiều nội dung cho khối tuần Google Sheet.");
-  const rows=Array.from({length:MULTI_GS_BLOCK_ROWS_569D4},()=>Array(8).fill(""));
-  rows[0][0]=`Hoạt động giáo dục tuần ${String(week).padStart(2,"0")}`;
-  rows[1][0]=`Năm học 2026 – 2027. ${formalSubjectGradeText(data)}, Trường TH – THCS & THPT Lại Sơn`;
-  rows[2][0]=`Tuần ${week}: từ ngày ${wd.fmt(wd.start)} đến ${wd.fmt(wd.end)}`;
-  rows[3]=["Thời gian","",`Ngày ${wd.days[0]}\nThứ hai`,`Ngày ${wd.days[1]}\nThứ ba`,`Ngày ${wd.days[2]}\nThứ tư`,`Ngày ${wd.days[3]}\nThứ năm`,`Ngày ${wd.days[4]}\nThứ sáu`,`Nội dung\nđiều chỉnh`];
-  rows[4]=["Buổi","Tiết","","","","","",""];
-  const dayKeys=["Hai","Ba","Tư","Năm","Sáu"];
-  for(let t=1;t<=7;t++){
-    const r=4+t; rows[r][0]=t===1?"Sáng":t===5?"Chiều":""; rows[r][1]=t;
-    dayKeys.forEach((d,i)=>rows[r][2+i]=multiGsLessonText569D4(data,d,t<=4?"Sáng":"Chiều",t));
+  const over7 = data.filter((x) => Number(x.tiet) > 7);
+  if (over7.length)
+    throw new Error(
+      `DỪNG GHI: còn ${over7.length} tiết lớn hơn Tiết 7 trong TKB nguồn. Hãy kiểm tra TKB trước khi ghi Google Sheet.`,
+    );
+  const noTitle = data.filter((x) => !clean(x.plan?.title));
+  if (noTitle.length)
+    throw new Error(
+      `DỪNG GHI: còn ${noTitle.length} tiết chưa ghép tên bài PPCT chung.`,
+    );
+  const teacherName = clean(selectedTeacher || TEACHER),
+    token = options.accessToken || (await getGoogleSheetsReadOnlyToken());
+  const target = await multiTeacherPersonalTarget562B9C2B(token, teacherName);
+  const headers = {
+    Authorization: `Bearer ${token}`,
+    "Content-Type": "application/json",
+  };
+  const base = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(target.spreadsheetId)}`;
+  const meta = await gsJson(
+    `${base}?fields=sheets.properties(sheetId,title,gridProperties)`,
+    { headers },
+  );
+  const sh = (meta.sheets || []).find(
+    (s) => Number(s?.properties?.sheetId) === Number(target.sheetId),
+  );
+  let rowCount = Number(sh?.properties?.gridProperties?.rowCount) || 1000;
+  const needed = MULTI_GS_FIRST_ROW_569D4 + 35 * MULTI_GS_BLOCK_ROWS_569D4;
+  if (rowCount < needed) {
+    await gsJson(`${base}:batchUpdate`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        requests: [
+          {
+            appendDimension: {
+              sheetId: target.sheetId,
+              dimension: "ROWS",
+              length: needed - rowCount,
+            },
+          },
+        ],
+      }),
+    });
   }
-  rows[12][0]=`Tổng số: ${data.length} tiết`;
-  rows[13][0]="TỔNG HỢP";
-  rows[14]=["TT","Nội dung","Số lượng tiết học","Ghi chú","","","",""];
-  let sr=15;
-  subjects.forEach((sub,i)=>{ rows[sr+i][0]=i+1; rows[sr+i][1]=sub; rows[sr+i][2]=data.filter(x=>normalizeSubjectForPlan(x.monHoc)===sub).length; });
-  let idx=subjects.length;
-  if(concurrent>0){ rows[sr+idx][0]=idx+1; rows[sr+idx][1]="Kiêm nhiệm"; rows[sr+idx][2]=concurrent; idx++; }
-  rows[31][1]="Tổng số"; rows[31][2]=data.length+concurrent;
-  rows[33][4]=formalSignatureDate(wd);
-  rows[34][0]="P. HIỆU TRƯỞNG"; rows[34][2]="TỔ TRƯỞNG"; rows[34][5]="NGƯỜI LẬP KẾ HOẠCH";
-  rows[35][5]=outputTeacherDisplayName();
-  const q=gsA1Title(target.sheetName);
-  const exists=await gsJson(`${base}/values/${encodeURIComponent(q+`!A${startRow}:H${endRow}`)}?majorDimension=ROWS`,{headers});
-  const action=(exists.values||[]).some(r=>(r||[]).some(v=>clean(v)))?"CẬP NHẬT":"GHI";
-  if(!options.skipConfirm && !confirm(`${action} TUẦN ${week} vào tab ${target.sheetName}?\n\nVùng dòng ${startRow}–${endRow}.\nTKB: ${data.length} tiết; tổng kể cả kiêm nhiệm: ${data.length+concurrent}.\nGoogle Sheet đa GV dùng đúng cấu trúc 7 tiết và TỔNG HỢP mỗi môn một dòng.`)) return false;
+  const { startRow, endRow } = multiGsWeekRange569D4(week),
+    wd = multiGsWeekDates569D4(week);
+  const subjects = [
+    ...new Set(data.map((x) => normalizeSubjectForPlan(x.monHoc))),
+  ].filter(Boolean);
+  const concurrent = getConcurrentPeriods();
+  if (subjects.length + (concurrent > 0 ? 1 : 0) > 16)
+    throw new Error(
+      "TỔNG HỢP có quá nhiều nội dung cho khối tuần Google Sheet.",
+    );
+  const rows = Array.from({ length: MULTI_GS_BLOCK_ROWS_569D4 }, () =>
+    Array(8).fill(""),
+  );
+  rows[0][0] = `Hoạt động giáo dục tuần ${String(week).padStart(2, "0")}`;
+  rows[1][0] = `Năm học 2026 – 2027. ${formalSubjectGradeText(data)}, Trường TH – THCS & THPT Lại Sơn`;
+  rows[2][0] = `Tuần ${week}: từ ngày ${wd.fmt(wd.start)} đến ${wd.fmt(wd.end)}`;
+  rows[3] = [
+    "Thời gian",
+    "",
+    `Ngày ${wd.days[0]}\nThứ hai`,
+    `Ngày ${wd.days[1]}\nThứ ba`,
+    `Ngày ${wd.days[2]}\nThứ tư`,
+    `Ngày ${wd.days[3]}\nThứ năm`,
+    `Ngày ${wd.days[4]}\nThứ sáu`,
+    `Nội dung\nđiều chỉnh`,
+  ];
+  rows[4] = ["Buổi", "Tiết", "", "", "", "", "", ""];
+  const dayKeys = ["Hai", "Ba", "Tư", "Năm", "Sáu"];
+  for (let t = 1; t <= 7; t++) {
+    const r = 4 + t;
+    rows[r][0] = t === 1 ? "Sáng" : t === 5 ? "Chiều" : "";
+    rows[r][1] = t;
+    dayKeys.forEach(
+      (d, i) =>
+        (rows[r][2 + i] = multiGsLessonText569D4(
+          data,
+          d,
+          t <= 4 ? "Sáng" : "Chiều",
+          t,
+        )),
+    );
+  }
+  rows[12][0] = `Tổng số: ${data.length} tiết`;
+  rows[13][0] = "TỔNG HỢP";
+  rows[14] = ["TT", "Nội dung", "Số lượng tiết học", "Ghi chú", "", "", "", ""];
+  let sr = 15;
+  subjects.forEach((sub, i) => {
+    rows[sr + i][0] = i + 1;
+    rows[sr + i][1] = sub;
+    rows[sr + i][2] = data.filter(
+      (x) => normalizeSubjectForPlan(x.monHoc) === sub,
+    ).length;
+  });
+  let idx = subjects.length;
+  if (concurrent > 0) {
+    rows[sr + idx][0] = idx + 1;
+    rows[sr + idx][1] = "Kiêm nhiệm";
+    rows[sr + idx][2] = concurrent;
+    idx++;
+  }
+  rows[31][1] = "Tổng số";
+  rows[31][2] = data.length + concurrent;
+  rows[33][4] = formalSignatureDate(wd);
+  rows[34][0] = "P. HIỆU TRƯỞNG";
+  rows[34][2] = "TỔ TRƯỞNG";
+  rows[34][5] = "NGƯỜI LẬP KẾ HOẠCH";
+  rows[35][5] = outputTeacherDisplayName();
+  const q = gsA1Title(target.sheetName);
+  const exists = await gsJson(
+    `${base}/values/${encodeURIComponent(q + `!A${startRow}:H${endRow}`)}?majorDimension=ROWS`,
+    { headers },
+  );
+  const action = (exists.values || []).some((r) =>
+    (r || []).some((v) => clean(v)),
+  )
+    ? "CẬP NHẬT"
+    : "GHI";
+  if (
+    !options.skipConfirm &&
+    !confirm(
+      `${action} TUẦN ${week} vào tab ${target.sheetName}?\n\nVùng dòng ${startRow}–${endRow}.\nTKB: ${data.length} tiết; tổng kể cả kiêm nhiệm: ${data.length + concurrent}.\nGoogle Sheet đa GV dùng đúng cấu trúc 7 tiết và TỔNG HỢP mỗi môn một dòng.`,
+    )
+  )
+    return false;
   // Xóa merge/cấu trúc cũ đúng vùng tuần mới rồi dựng lại độc lập.
-  const req=[{unmergeCells:{range:{sheetId:target.sheetId,startRowIndex:startRow-1,endRowIndex:endRow,startColumnIndex:0,endColumnIndex:8}}}];
-  const merge=(r0,r1,c0,c1)=>req.push({mergeCells:{range:{sheetId:target.sheetId,startRowIndex:startRow-1+r0,endRowIndex:startRow-1+r1,startColumnIndex:c0,endColumnIndex:c1},mergeType:"MERGE_ALL"}});
-  merge(0,1,0,8); merge(1,2,0,8); merge(2,3,0,8); merge(3,4,0,2);
-  for(let c=2;c<8;c++) merge(3,5,c,c+1);
-  merge(5,9,0,1); merge(9,12,0,1); merge(12,13,0,8); merge(13,14,0,8);
+  const req = [
+    {
+      unmergeCells: {
+        range: {
+          sheetId: target.sheetId,
+          startRowIndex: startRow - 1,
+          endRowIndex: endRow,
+          startColumnIndex: 0,
+          endColumnIndex: 8,
+        },
+      },
+    },
+  ];
+  const merge = (r0, r1, c0, c1) =>
+    req.push({
+      mergeCells: {
+        range: {
+          sheetId: target.sheetId,
+          startRowIndex: startRow - 1 + r0,
+          endRowIndex: startRow - 1 + r1,
+          startColumnIndex: c0,
+          endColumnIndex: c1,
+        },
+        mergeType: "MERGE_ALL",
+      },
+    });
+  merge(0, 1, 0, 8);
+  merge(1, 2, 0, 8);
+  merge(2, 3, 0, 8);
+  merge(3, 4, 0, 2);
+  for (let c = 2; c < 8; c++) merge(3, 5, c, c + 1);
+  merge(5, 9, 0, 1);
+  merge(9, 12, 0, 1);
+  merge(12, 13, 0, 8);
+  merge(13, 14, 0, 8);
   // summary: B:D? giữ 4 cột nhìn giống Excel, trải toàn A:H
-  for(let r=15;r<31;r++){ merge(r,r+1,1,3); merge(r,r+1,3,5); merge(r,r+1,5,8); }
-  merge(31,32,0,1); merge(31,32,1,3); merge(31,32,3,5); merge(31,32,5,8);
-  merge(33,34,4,8); merge(34,35,0,2); merge(34,35,2,5); merge(34,35,5,8); merge(35,36,5,8);
-  req.push({repeatCell:{range:{sheetId:target.sheetId,startRowIndex:startRow-1,endRowIndex:endRow,startColumnIndex:0,endColumnIndex:8},cell:{userEnteredFormat:{textFormat:{fontFamily:"Times New Roman",fontSize:12},horizontalAlignment:"CENTER",verticalAlignment:"MIDDLE",wrapStrategy:"WRAP"}},fields:"userEnteredFormat(textFormat,horizontalAlignment,verticalAlignment,wrapStrategy)"}});
-  req.push({repeatCell:{range:{sheetId:target.sheetId,startRowIndex:startRow-1+3,endRowIndex:startRow-1+15,startColumnIndex:0,endColumnIndex:8},cell:{userEnteredFormat:{borders:{top:{style:"SOLID"},bottom:{style:"SOLID"},left:{style:"SOLID"},right:{style:"SOLID"}}}},fields:"userEnteredFormat.borders"}});
-  req.push({repeatCell:{range:{sheetId:target.sheetId,startRowIndex:startRow-1+15,endRowIndex:startRow-1+32,startColumnIndex:0,endColumnIndex:8},cell:{userEnteredFormat:{borders:{top:{style:"SOLID"},bottom:{style:"SOLID"},left:{style:"SOLID"},right:{style:"SOLID"}}}},fields:"userEnteredFormat.borders"}});
-  const green={red:0.043,green:0.478,blue:0.325}, mint={red:0.918,green:0.969,blue:0.937}, white={red:1,green:1,blue:1};
-  [3,4,12,14,31].forEach(r=>req.push({repeatCell:{range:{sheetId:target.sheetId,startRowIndex:startRow-1+r,endRowIndex:startRow+r,startColumnIndex:0,endColumnIndex:8},cell:{userEnteredFormat:{backgroundColor:green,textFormat:{bold:true,foregroundColor:white,fontFamily:"Times New Roman",fontSize:12}}},fields:"userEnteredFormat(backgroundColor,textFormat)"}}));
-  req.push({repeatCell:{range:{sheetId:target.sheetId,startRowIndex:startRow-1+5,endRowIndex:startRow-1+12,startColumnIndex:0,endColumnIndex:8},cell:{userEnteredFormat:{backgroundColor:mint}},fields:"userEnteredFormat.backgroundColor"}});
-  req.push({repeatCell:{range:{sheetId:target.sheetId,startRowIndex:startRow-1+15,endRowIndex:startRow-1+31,startColumnIndex:0,endColumnIndex:8},cell:{userEnteredFormat:{backgroundColor:mint}},fields:"userEnteredFormat.backgroundColor"}});
-  await gsJson(`${base}:batchUpdate`,{method:"POST",headers,body:JSON.stringify({requests:req})});
-  await gsJson(`${base}/values/${encodeURIComponent(q+`!A${startRow}:H${endRow}`)}?valueInputOption=USER_ENTERED`,{method:"PUT",headers,body:JSON.stringify({range:`${q}!A${startRow}:H${endRow}`,majorDimension:"ROWS",values:rows})});
-  if(!options.silentSuccess) alert(`GHI TUẦN ${week} THÀNH CÔNG\n\nTab: ${target.sheetName}\nVùng: dòng ${startRow}–${endRow}\nSố tiết theo TKB: ${data.length}\nTổng kể cả kiêm nhiệm: ${data.length+concurrent}\n\nCấu trúc Google Sheet đa GV: Tiết 1–7, mỗi môn TỔNG HỢP một dòng.`);
+  for (let r = 15; r < 31; r++) {
+    merge(r, r + 1, 1, 3);
+    merge(r, r + 1, 3, 5);
+    merge(r, r + 1, 5, 8);
+  }
+  merge(31, 32, 0, 1);
+  merge(31, 32, 1, 3);
+  merge(31, 32, 3, 5);
+  merge(31, 32, 5, 8);
+  merge(33, 34, 4, 8);
+  merge(34, 35, 0, 2);
+  merge(34, 35, 2, 5);
+  merge(34, 35, 5, 8);
+  merge(35, 36, 5, 8);
+  req.push({
+    repeatCell: {
+      range: {
+        sheetId: target.sheetId,
+        startRowIndex: startRow - 1,
+        endRowIndex: endRow,
+        startColumnIndex: 0,
+        endColumnIndex: 8,
+      },
+      cell: {
+        userEnteredFormat: {
+          textFormat: { fontFamily: "Times New Roman", fontSize: 12 },
+          horizontalAlignment: "CENTER",
+          verticalAlignment: "MIDDLE",
+          wrapStrategy: "WRAP",
+        },
+      },
+      fields:
+        "userEnteredFormat(textFormat,horizontalAlignment,verticalAlignment,wrapStrategy)",
+    },
+  });
+  req.push({
+    repeatCell: {
+      range: {
+        sheetId: target.sheetId,
+        startRowIndex: startRow - 1 + 3,
+        endRowIndex: startRow - 1 + 15,
+        startColumnIndex: 0,
+        endColumnIndex: 8,
+      },
+      cell: {
+        userEnteredFormat: {
+          borders: {
+            top: { style: "SOLID" },
+            bottom: { style: "SOLID" },
+            left: { style: "SOLID" },
+            right: { style: "SOLID" },
+          },
+        },
+      },
+      fields: "userEnteredFormat.borders",
+    },
+  });
+  req.push({
+    repeatCell: {
+      range: {
+        sheetId: target.sheetId,
+        startRowIndex: startRow - 1 + 15,
+        endRowIndex: startRow - 1 + 32,
+        startColumnIndex: 0,
+        endColumnIndex: 8,
+      },
+      cell: {
+        userEnteredFormat: {
+          borders: {
+            top: { style: "SOLID" },
+            bottom: { style: "SOLID" },
+            left: { style: "SOLID" },
+            right: { style: "SOLID" },
+          },
+        },
+      },
+      fields: "userEnteredFormat.borders",
+    },
+  });
+  const green = { red: 0.043, green: 0.478, blue: 0.325 },
+    mint = { red: 0.918, green: 0.969, blue: 0.937 },
+    white = { red: 1, green: 1, blue: 1 };
+  [3, 4, 12, 14, 31].forEach((r) =>
+    req.push({
+      repeatCell: {
+        range: {
+          sheetId: target.sheetId,
+          startRowIndex: startRow - 1 + r,
+          endRowIndex: startRow + r,
+          startColumnIndex: 0,
+          endColumnIndex: 8,
+        },
+        cell: {
+          userEnteredFormat: {
+            backgroundColor: green,
+            textFormat: {
+              bold: true,
+              foregroundColor: white,
+              fontFamily: "Times New Roman",
+              fontSize: 12,
+            },
+          },
+        },
+        fields: "userEnteredFormat(backgroundColor,textFormat)",
+      },
+    }),
+  );
+  req.push({
+    repeatCell: {
+      range: {
+        sheetId: target.sheetId,
+        startRowIndex: startRow - 1 + 5,
+        endRowIndex: startRow - 1 + 12,
+        startColumnIndex: 0,
+        endColumnIndex: 8,
+      },
+      cell: { userEnteredFormat: { backgroundColor: mint } },
+      fields: "userEnteredFormat.backgroundColor",
+    },
+  });
+  req.push({
+    repeatCell: {
+      range: {
+        sheetId: target.sheetId,
+        startRowIndex: startRow - 1 + 15,
+        endRowIndex: startRow - 1 + 31,
+        startColumnIndex: 0,
+        endColumnIndex: 8,
+      },
+      cell: { userEnteredFormat: { backgroundColor: mint } },
+      fields: "userEnteredFormat.backgroundColor",
+    },
+  });
+  await gsJson(`${base}:batchUpdate`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({ requests: req }),
+  });
+  await gsJson(
+    `${base}/values/${encodeURIComponent(q + `!A${startRow}:H${endRow}`)}?valueInputOption=USER_ENTERED`,
+    {
+      method: "PUT",
+      headers,
+      body: JSON.stringify({
+        range: `${q}!A${startRow}:H${endRow}`,
+        majorDimension: "ROWS",
+        values: rows,
+      }),
+    },
+  );
+  if (!options.silentSuccess)
+    alert(
+      `GHI TUẦN ${week} THÀNH CÔNG\n\nTab: ${target.sheetName}\nVùng: dòng ${startRow}–${endRow}\nSố tiết theo TKB: ${data.length}\nTổng kể cả kiêm nhiệm: ${data.length + concurrent}\n\nCấu trúc Google Sheet đa GV: Tiết 1–7, mỗi môn TỔNG HỢP một dòng.`,
+    );
   return true;
 }
-const exportSelectedWeek1To35ToGoogleSheetBefore569D4=exportSelectedWeek1To35ToGoogleSheet;
-exportSelectedWeek1To35ToGoogleSheet=async function(options={}){
-  const teacherName=clean(selectedTeacher||TEACHER), isDam=normalizeTeacherName(teacherName)===normalizeTeacherName(TEACHER);
-  if(isDam) return exportSelectedWeek1To35ToGoogleSheetBefore569D4(options);
+const exportSelectedWeek1To35ToGoogleSheetBefore569D4 =
+  exportSelectedWeek1To35ToGoogleSheet;
+exportSelectedWeek1To35ToGoogleSheet = async function (options = {}) {
+  const teacherName = clean(selectedTeacher || TEACHER),
+    isDam = normalizeTeacherName(teacherName) === normalizeTeacherName(TEACHER);
+  if (isDam) return exportSelectedWeek1To35ToGoogleSheetBefore569D4(options);
   return writeMultiTeacherGoogleSheet569D4(options);
 };
-const resetGoogleSheetWeekRangeBefore569D4=resetGoogleSheetWeekRange;
-resetGoogleSheetWeekRange=async function(firstWeek,lastWeek){
-  const teacherName=clean(selectedTeacher||TEACHER), isDam=normalizeTeacherName(teacherName)===normalizeTeacherName(TEACHER);
-  if(isDam) return resetGoogleSheetWeekRangeBefore569D4(firstWeek,lastWeek);
-  const from=Math.max(1,Math.min(35,Number(firstWeek)||1)), to=Math.max(from,Math.min(35,Number(lastWeek)||from));
-  const token=await getGoogleSheetsReadOnlyToken(), target=await multiTeacherPersonalTarget562B9C2B(token,teacherName);
-  const headers={Authorization:`Bearer ${token}`,"Content-Type":"application/json"}, base=`https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(target.spreadsheetId)}`, q=gsA1Title(target.sheetName);
-  const r1=multiGsWeekRange569D4(from), r2=multiGsWeekRange569D4(to);
-  if(!confirm(`LÀM MỚI ${from===to?`TUẦN ${from}`:`TUẦN ${from}–${to}`} trên tab ${target.sheetName}?\n\nVùng A${r1.startRow}:H${r2.endRow}. Các tuần ngoài phạm vi được giữ nguyên.`)) return false;
-  await gsJson(`${base}/values/${encodeURIComponent(q+`!A${r1.startRow}:H${r2.endRow}`)}:clear`,{method:"POST",headers,body:"{}"});
-  alert(`LÀM MỚI THÀNH CÔNG\n\nTab: ${target.sheetName}\nVùng đã làm sạch: A${r1.startRow}:H${r2.endRow}.`);
+const resetGoogleSheetWeekRangeBefore569D4 = resetGoogleSheetWeekRange;
+resetGoogleSheetWeekRange = async function (firstWeek, lastWeek) {
+  const teacherName = clean(selectedTeacher || TEACHER),
+    isDam = normalizeTeacherName(teacherName) === normalizeTeacherName(TEACHER);
+  if (isDam) return resetGoogleSheetWeekRangeBefore569D4(firstWeek, lastWeek);
+  const from = Math.max(1, Math.min(35, Number(firstWeek) || 1)),
+    to = Math.max(from, Math.min(35, Number(lastWeek) || from));
+  const token = await getGoogleSheetsReadOnlyToken(),
+    target = await multiTeacherPersonalTarget562B9C2B(token, teacherName);
+  const headers = {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    base = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(target.spreadsheetId)}`,
+    q = gsA1Title(target.sheetName);
+  const r1 = multiGsWeekRange569D4(from),
+    r2 = multiGsWeekRange569D4(to);
+  if (
+    !confirm(
+      `LÀM MỚI ${from === to ? `TUẦN ${from}` : `TUẦN ${from}–${to}`} trên tab ${target.sheetName}?\n\nVùng A${r1.startRow}:H${r2.endRow}. Các tuần ngoài phạm vi được giữ nguyên.`,
+    )
+  )
+    return false;
+  await gsJson(
+    `${base}/values/${encodeURIComponent(q + `!A${r1.startRow}:H${r2.endRow}`)}:clear`,
+    { method: "POST", headers, body: "{}" },
+  );
+  alert(
+    `LÀM MỚI THÀNH CÔNG\n\nTab: ${target.sheetName}\nVùng đã làm sạch: A${r1.startRow}:H${r2.endRow}.`,
+  );
   return true;
 };
+
+// Nhận biết đang chạy bản localhost/VS Code hay GitHub Pages (không dựa vào cache).
+(() => {
+  const el = document.getElementById("tkbBuildOrigin");
+  if (!el) return;
+  const host = location.hostname;
+  el.textContent =
+    host === "localhost" || host === "127.0.0.1"
+      ? `VS Code / localhost (${location.host})`
+      : host.endsWith("github.io")
+        ? `GitHub Pages (${host})`
+        : location.origin;
+})();

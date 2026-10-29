@@ -1,0 +1,9 @@
+KIỂM THỬ BẢN CHẨN ĐOÁN TKB - 29/10/2026
+1. node --check app.js: ĐẠT.
+2. Chromium (giao diện được tải từ mã HTML/JS cục bộ): không đăng nhập -> hiện cảnh báo, khóa nút nạp lại: ĐẠT.
+3. Chromium + Supabase mô phỏng, chọn Tuần 9, 15 tiết cục bộ và 22 tiết trên server -> nhận diện chênh lệch, mở nút nạp: ĐẠT.
+4. Chromium + Supabase mô phỏng, nạp lại: 22 tiết sau thao tác; yêu cầu sao lưu; không có lệnh ghi Supabase: ĐẠT.
+5. Bộ thử parser Excel tháng 11 bằng dữ liệu bảng được trích: nhận đủ 22 tiết, bảo toàn phiên bản cũ và xác định Tuần 9 khi ô TKB hiệu lực đang là Tuần 1: ĐẠT.
+6. Cấu trúc dự án/ tệp chính/ toàn vẹn ZIP: ĐẠT.
+
+CHƯA KIỂM THỬ: truy cập Supabase của người dùng, kết nối Google Sheets thực tế, xuất/in với tài khoản người dùng, thao tác đồng bộ giữa các máy của người dùng, và toàn bộ các chức năng khác trong môi trường mạng thật.

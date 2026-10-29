@@ -1,0 +1,43 @@
+THỜI KHÓA BIỂU GV ĐẬM – V4 / 29-10-2026
+HƯỚNG DẪN THỬ NGHIỆM VÀ TRIỂN KHAI AN TOÀN
+
+VẤN ĐỀ THỰC TẾ:
+1. VS Code/localhost và GitHub Pages là hai địa chỉ khác nhau, với cache và phiên bản mã nguồn có thể khác nhau.
+2. Nhấn Ctrl+Shift+R khi đang ở vothanhdamkg1982-lang.github.io chỉ tải lại mã nguồn ĐÃ ĐƯỢC ĐĂNG LÊN GITHUB, không tải mã mới đang lưu trong VS Code.
+3. Supabase báo "trùng nội dung" khi mã content_hash phiên bản mới trùng với bản đã có trên server.
+4. Trong ảnh GitHub bạn gửi, trang hiển thị 20/20 tiết, khác với 15 tiết trên VS Code và 22 tiết đọc từ Excel nguồn. Không được giả định ba con số này là cùng một dữ liệu.
+
+CÁC THAY ĐỔI CỦA V4:
+- Nhãn Bản V4 – VS Code/localhost hay GitHub Pages hiển thị trên giao diện để phân biệt mã nguồn.
+- Giữ nguyên HĐTN 1 lớp 3B1 thứ Hai, HĐTN 2 lớp 3B1 thứ Tư, HĐTN 2 lớp 2C thứ Năm.
+- Tên bài HĐTN được xem khi bấm vào tiết, không luôn hiển thị trên lịch.
+- Có nút ĐỐI CHIẾU NGUỒN DỮ LIỆU (chỉ đọc) trong phần Kho TKB.
+- Khi lưu TKB mới, chỉ thử tạo mã revision nếu Supabase xác nhận xung đột mã nội dung; không xóa/ghi đè bản TKB cũ.
+- Tải lại Kho TKB KHÔNG tự động lấy dữ liệu cache cũ của máy ghi ngược lên Supabase.
+- Khi lưu bản mới, kiểm chứng tổng số dòng trên Supabase. Nếu không đủ, báo lỗi và chỉ dọn bản mới vừa tạo.
+
+BƯỚC A – KIỂM TRA TRÊN VS CODE, KHÔNG CHẠM WEBSITE CHÍNH:
+1. Sao lưu thư mục dự án hiện tại (bao gồm .git); KHÔNG xóa thư mục .git.
+2. Giải nén ZIP. Chép index.html, app.js, styles.css vào dự án đang mở trong VS Code và ghi đè đúng ba tệp này.
+3. Mở bằng Live Server (http://127.0.0.1:5500/... hoặc http://localhost:...); KHÔNG bấm địa chỉ github.io ở bước này.
+4. Kiểm tra có nhãn "Bản V4 · VS Code / localhost"; nếu không thấy, mã mới CHƯA được tải.
+5. Đăng nhập cùng tài khoản Supabase; chọn giáo viên Đậm, Tuần 9.
+6. Trong Kho lưu trữ, bấm ĐỐI CHIẾU NGUỒN DỮ LIỆU. So sánh số tiết local/remote, mốc tuần và tên tệp. KHÔNG xóa bản cũ.
+7. Nếu remote có nhiều tiết hơn local, sao lưu và bấm NẠP LẠI TỪ SUPABASE (chỉ đọc).
+8. Nếu remote vẫn thiếu tiết, tạo tệp sao lưu Kho TKB, chọn nút KHÔI PHỤC TUẦN ĐANG XEM TỪ EXCEL; chọn tệp tháng 11 kèm ZIP, xác nhận 22 tiết cho đúng Tuần 9 và giáo viên Đậm; chỉ bấm OK sau khi đọc rõ thông tin.
+9. Tải lại localhost, kiểm tra đủ 22 tiết (thứ Hai 2 tiết, thứ Ba 5 tiết) và ba tiết HĐTN; bấm HĐTN mở được nội dung Phụ lục 2.
+10. Nếu vẫn thấy 15 hoặc 20 tiết, dừng thao tác; chụp nhãn bản V4 và bảng ĐỐI CHIẾU. Không nhập lại liên tiếp.
+
+BƯỚC B – CHỈ ĐĂNG WEBSITE KHI BẢN LOCAL ĐÃ KIỂM TRA ĐÚNG:
+1. Mở VS Code Source Control (Ctrl+Shift+G).
+2. Chỉ stage ba tệp index.html, app.js, styles.css.
+3. Commit với mô tả "TKB V4 sua dong bo va HĐTN".
+4. Nhấn Sync Changes / Push lên nhánh đang cấp mã cho GitHub Pages.
+5. Mở website github.io, nhấn Ctrl+Shift+R; phải thấy nhãn "Bản V4 · GitHub Pages". Nếu vẫn không thấy V4, chưa triển khai đúng nhánh hoặc Pages chưa nhận bản mới.
+6. Chọn giáo viên Đậm, Tuần 9, xác minh số tiết và Phụ lục 2 trước khi tuyên bố hoàn tất.
+
+LƯU Ý AN TOÀN:
+- Không cần chạy lại SQL để cài V4 nếu các bảng Supabase hiện tại đang hoạt động.
+- Chưa thể kiểm thử trực tiếp Supabase của người dùng trong môi trường tạo gói này. Kiểm thử Supabase là mô phỏng (xem KET_QUA_KIEM_THU_V4.txt).
+- Việc copy mã nguồn từ ZIP vào ổ D KHÔNG tự đẩy mã lên github.io.
+- Không chia sẻ ảnh chụp chứa mật khẩu hoặc token đăng nhập.

@@ -149,3 +149,17 @@ button:hover,select:hover{border-color:#9BC9AE}.toolbar button:hover{background:
 .week-sync-status[data-state="warning"]{color:#825000}
 .week-sync-refresh{font-size:10px!important;padding:4px 9px!important;align-self:flex-start;min-height:28px}
 @media print{.week-sync-control{display:none!important}}
+
+/* Khôi phục an toàn một tuần từ tệp Excel */
+.repair-week-action{background:#0c6e58!important;color:#fff!important;border:1px solid #0c6e58!important;max-width:100%;white-space:normal;line-height:1.35;min-height:42px}
+.repair-week-action:disabled{opacity:.6;cursor:wait}
+.repair-week-status{display:block;color:#425466;font-size:12px;line-height:1.45;max-width:290px}
+
+/* Chẩn đoán an toàn nguồn dữ liệu máy ↔ Supabase */
+.tkb-diag-result {display:grid;gap:10px;line-height:1.65;overflow-wrap:anywhere}
+.tkb-diag-panel {border:1px solid #c9dfd6;border-radius:10px;padding:10px 12px;background:#f7fbf8}
+.tkb-diag-muted {color:#536779;font-size:.9em}
+.tkb-diag-error {color:#ae3e1d;font-weight:650}
+.tkb-diag-success {color:#126646;font-weight:650}
+
+.tkb-build-indicator{position:relative;margin:8px auto 0;max-width:1140px;padding:6px 10px;color:#33506a;font-size:12px;text-align:right;background:#f2f7fc;border:1px solid #d8e4ef;border-radius:7px;}

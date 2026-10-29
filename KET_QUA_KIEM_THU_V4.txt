@@ -1,0 +1,14 @@
+V4 – KẾT QUẢ KIỂM THỬ (29/10/2026)
+1. node --check app.js: ĐẠT.
+2. Parser với dữ liệu đã chuyển từ Excel tháng 11: 22 tiết cho GV Đậm; 3 HĐTN (thứ Hai 3B1, thứ Tư 3B1, thứ Năm 2C): ĐẠT.
+3. Hàm nhận diện môn HĐTN và môn chính: ĐẠT.
+4. Mock Supabase báo trùng content_hash: tạo revision mới, lưu và xác minh số dòng, không xóa phiên bản cũ: ĐẠT.
+5. Mock Supabase báo xung đột unique khác hash: từ chối lưu an toàn, không vượt rào ràng buộc: ĐẠT.
+6. Mock Supabase lưu phiên bản mới không xung đột và kiểm tra lại dòng: ĐẠT.
+7. Đầu vào tuần hiệu lực không hợp lệ: từ chối ghi: ĐẠT.
+8. Chromium: chẩn đoán khi chưa đăng nhập, cấm nạp đè: ĐẠT.
+9. Chromium + Supabase mô phỏng: 15 tiết local / 22 tiết remote; sao lưu và nạp lại chỉ đọc 22 tiết: ĐẠT.
+10. Kiểm tra HTML tải app.js/styles.css kèm nhãn version V4: ĐẠT.
+11. Supabase THỰC TẾ của người dùng: CHƯA THỂ KIỂM THỬ (không có phiên đăng nhập).
+12. Website GitHub Pages SAU KHI NGƯỜI DÙNG PUSH: CHƯA THỂ KIỂM THỬ.
+13. Không khẳng định toàn bộ tính năng Google Sheets/PDF/đồng bộ nhiều máy đã chạy thực tế vì không có quyền đăng nhập các hệ thống đó.
