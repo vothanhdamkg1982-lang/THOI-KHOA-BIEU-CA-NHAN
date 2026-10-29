@@ -2303,14 +2303,8 @@ function renderStats() {
     .map(([a, b]) => `<div class="card"><small>${a}</small><b>${b}</b></div>`)
     .join("");
 }
-function hdtntimetablePreviewHtml(x, compact = false) {
-  if (!isHDTNSubject(x.monHoc)) return "";
-  const cls = compact ? "matrix-hdtn-brief" : "hdtn-plan-brief";
-  if (x.plan && !x.planIssue)
-    return `<div class="${cls}"><b>${esc(x.plan.subject)}</b> · ${esc(x.plan.title)}</div>`;
-  const message = x.planIssue || "Chưa xác định được loại tiết hoặc bài HĐTN từ Phụ lục 2";
-  return `<div class="${cls} hdtn-need-review">⚠ ${esc(message)}</div>`;
-}
+// Nội dung bài từ Phụ lục 2 chỉ hiển thị khi bấm vào tiết học.
+// Dạng bảng và lịch tuần đều giữ một dòng tên môn như các môn khác.
 function renderTable(data) {
   // Gộp Thứ và Buổi theo đúng nhóm đang hiển thị (kể cả sau khi lọc).
   let rows = "";
@@ -2330,12 +2324,12 @@ function renderTable(data) {
         const cls = ["lesson-row"];
         if (firstDay) cls.push("day-start");
         if (k === j) cls.push("session-start");
-        rows += `<tr class="${cls.join(" ")} clickable-lesson" data-lesson-index="${allLessons.indexOf(x)}" title="Bấm để xem nguồn Excel">`;
+        rows += `<tr class="${cls.join(" ")} clickable-lesson" data-lesson-index="${allLessons.indexOf(x)}" title="Bấm để xem thông tin tiết học và Phụ lục 2">`;
         if (firstDay)
           rows += `<td class="day-cell" rowspan="${dayEnd - i}"><strong>THỨ ${esc(String(thu).toUpperCase())}</strong></td>`;
         if (k === j)
           rows += `<td class="session-cell" rowspan="${sessionEnd - j}"><strong>${esc(buoi.toUpperCase())}</strong></td>`;
-        rows += `<td class="tiet-cell">${esc(x.tiet)}</td><td>${esc(x.thoiGian)}</td><td class="class-cell"><b>${esc(x.lop)}</b></td><td>${esc(displayTeachingSubject(x))}${hdtntimetablePreviewHtml(x)}</td><td class="homeroom-cell">${esc(x.gvcn || "")}</td><td class="point-cell">${pointBadge(x.diemTruong)}</td></tr>`;
+        rows += `<td class="tiet-cell">${esc(x.tiet)}</td><td>${esc(x.thoiGian)}</td><td class="class-cell"><b>${esc(x.lop)}</b></td><td>${esc(displayTeachingSubject(x))}</td><td class="homeroom-cell">${esc(x.gvcn || "")}</td><td class="point-cell">${pointBadge(x.diemTruong)}</td></tr>`;
         firstDay = false;
       }
       j = sessionEnd;
@@ -2372,7 +2366,7 @@ function renderWeek(data) {
               const items = sd.filter(
                 (x) => x.thu === day && Number(x.tiet) === tiet,
               );
-              return `<td class="matrix-slot">${items.map((x) => `<div class="matrix-lesson clickable-lesson" data-lesson-index="${allLessons.indexOf(x)}" title="Bấm để xem nguồn Excel"><div class="matrix-class">${esc(x.lop)}</div><div class="matrix-subject">${esc(displayTeachingSubject(x))}</div>${hdtntimetablePreviewHtml(x, true)}<div class="matrix-point">${pointBadge(x.diemTruong, true)}</div><div class="matrix-time">${esc(x.thoiGian)}</div></div>`).join("")}</td>`;
+              return `<td class="matrix-slot">${items.map((x) => `<div class="matrix-lesson clickable-lesson" data-lesson-index="${allLessons.indexOf(x)}" title="Bấm để xem thông tin tiết học và Phụ lục 2"><div class="matrix-class">${esc(x.lop)}</div><div class="matrix-subject">${esc(displayTeachingSubject(x))}</div><div class="matrix-point">${pointBadge(x.diemTruong, true)}</div><div class="matrix-time">${esc(x.thoiGian)}</div></div>`).join("")}</td>`;
             })
             .join("");
           return `<tr><th class="matrix-period"><b>Tiết ${tiet}</b>${time ? `<small>${esc(time)}</small>` : ""}</th>${cells}</tr>`;

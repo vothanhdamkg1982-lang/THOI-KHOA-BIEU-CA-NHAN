@@ -1,0 +1,26 @@
+THỜI KHÓA BIỂU GV ĐẬM - HĐTN CHỈ HIỆN TÊN BÀI KHI BẤM
+Bản cập nhật: 29/10/2026
+
+MỤC ĐÍCH
+- Trong Dạng bảng: cột Môn học chỉ hiện HĐTN 1 hoặc HĐTN 2, không chèn tên bài dài.
+- Trong Lịch tuần: ô tiết chỉ hiện lớp, môn, điểm trường và thời gian như các môn khác.
+- Bấm vào tiết bất kỳ (kể cả HĐTN) để mở cửa sổ ĐỐI CHIẾU NGUỒN EXCEL; tại đây xem tên bài chi tiết lấy từ Phụ lục 2 của tuần đang chọn.
+- Nếu Phụ lục 2 chưa có bài, cửa sổ chi tiết sẽ báo thiếu bài; bảng chính không có dòng cảnh báo dài.
+
+DỮ LIỆU VÀ QUY TẮC GIỮ NGUYÊN
+- Thứ Hai sáng tiết 1 lớp 3B1 -> HĐTN 1 lớp 3.
+- Thứ Tư sáng tiết 3 lớp 3B1 -> HĐTN 2 lớp 3.
+- Thứ Năm sáng tiết 1 lớp 2C -> HĐTN 2 lớp 2.
+- Mọi dữ liệu TKB, Phụ lục 2, thống kê số tiết, xuất Excel/PDF, đồng bộ tuần Supabase không bị chỉnh sửa.
+
+CẬP NHẬT TRONG VS CODE
+1. Sao lưu mã nguồn hiện đang chạy ổn định.
+2. Trong thư mục ZIP, sao chép ghi đè app.js, index.html và styles.css vào thư mục dự án VS Code.
+3. Không cần chạy SQL và không cần nhập lại Phụ lục 2 nếu app đã nhận đủ dữ liệu.
+4. Tải lại trang bằng Ctrl+F5.
+5. Chọn giáo viên Đậm, Tuần 9, thử Dạng bảng rồi Lịch tuần. Cả ba tiết HĐTN vẫn phải xuất hiện; tên bài chỉ có trong cửa sổ khi bấm vào ô tiết.
+
+KIỂM THỬ
+- Node.js kiểm tra cú pháp app.js: đạt.
+- Chromium với bộ dữ liệu giả lập: Dạng bảng và Lịch tuần đều giấu tên bài; nhấp HĐTN 1 lớp 3B1, HĐTN 2 lớp 3B1, HĐTN 2 lớp 2C đều mở đúng tiêu đề bài trong cửa sổ chi tiết; đóng cửa sổ: đạt.
+- Chưa chạy trực tiếp bằng tài khoản và Supabase thực tế, chưa triển khai website chính thức.

@@ -1,0 +1,10 @@
+29/10/2026 - BẢN HĐTN CHỈ HIỆN TÊN BÀI KHI BẤM
+
+1. app.js: Node --check: ĐẠT.
+2. HTML/CSS liên kết với mã phiên bản chống bộ nhớ đệm mới: ĐẠT.
+3. Chromium 1366x900, dữ liệu mô phỏng: ĐẠT.
+   - Dạng bảng: 4 tiết (3 HĐTN + 1 Tin học); không hiện tên bài ở cột môn.
+   - Lịch tuần: 4 tiết; không hiện tên bài trong ô lịch.
+   - Bấm vào từng tiết HĐTN lớp 3B1 / lớp 2C: tiêu đề chi tiết Phụ lục 2 đúng; đóng popup: ĐẠT.
+4. Không sửa quy tắc ghép Phụ lục 2 hoặc SQL.
+5. Chưa xác nhận trên website và Supabase thực tế.

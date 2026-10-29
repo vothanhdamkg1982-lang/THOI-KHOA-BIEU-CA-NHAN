@@ -149,10 +149,3 @@ button:hover,select:hover{border-color:#9BC9AE}.toolbar button:hover{background:
 .week-sync-status[data-state="warning"]{color:#825000}
 .week-sync-refresh{font-size:10px!important;padding:4px 9px!important;align-self:flex-start;min-height:28px}
 @media print{.week-sync-control{display:none!important}}
-
-/* HĐTN 1/2/3 - tên bài lấy đúng theo khối/tuần/loại tiết ở Phụ lục 2. */
-.hdtn-plan-brief{font-size:12px;font-weight:500;line-height:1.45;color:#145b43;margin-top:5px;max-width:440px;white-space:normal;overflow-wrap:anywhere}
-.hdtn-plan-brief b,.matrix-hdtn-brief b{font-weight:800;color:#065f46}
-.matrix-hdtn-brief{font-size:11px;line-height:1.35;color:#215c43;margin:3px 0 5px;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;overflow-wrap:anywhere}
-.hdtn-need-review{color:#945b0d!important;font-weight:650}
-@media print{.hdtn-plan-brief,.matrix-hdtn-brief{color:#222!important}}
