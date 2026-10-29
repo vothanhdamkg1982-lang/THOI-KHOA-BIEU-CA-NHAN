@@ -282,138 +282,89 @@ function lessonToSupabaseRow(x, versionId, teacherName = TEACHER) {
 // LƯU PHIÊN BẢN TKB AN TOÀN (V4): kiểm tra ràng buộc trên server và
 // chỉ tạo phiên bản MỚI, không ghi đè/xóa dữ liệu phiên bản trước.
 function uniqueRevisionHash(base, week) {
-  const random =
-    typeof crypto !== "undefined" && crypto.randomUUID
-      ? crypto.randomUUID().slice(0, 8)
-      : Math.random().toString(36).slice(2, 10);
+  const random = typeof crypto !== "undefined" && crypto.randomUUID
+    ? crypto.randomUUID().slice(0, 8)
+    : Math.random().toString(36).slice(2, 10);
   return `${base}:w${week}:rev${Date.now().toString(36)}${random}`;
 }
 async function verifyTimetableVersionRows(versionId, expectedRows, ownerId) {
   // PostgREST có thể giới hạn số dòng trả về; chỉ lấy tổng bằng count=exact.
-  const { count, error } = await supabaseClient
-    .from("tkb_timetable_lessons")
-    .select("id", { count: "exact", head: true })
-    .eq("timetable_version_id", versionId)
-    .eq("user_id", ownerId);
-  if (error) throw error;
-  if (Number(count) !== Number(expectedRows))
-    throw new Error(
-      `Supabase chỉ xác nhận ${count ?? "không rõ"}/${expectedRows} tiết. Bản vừa ghi chưa được xác nhận; không xóa bản cũ.`,
-    );
+  const {count,error} = await supabaseClient.from("tkb_timetable_lessons")
+    .select("id",{count:"exact",head:true})
+    .eq("timetable_version_id",versionId).eq("user_id",ownerId);
+  if(error) throw error;
+  if(Number(count) !== Number(expectedRows))
+    throw new Error(`Supabase chỉ xác nhận ${count ?? 'không rõ'}/${expectedRows} tiết. Bản vừa ghi chưa được xác nhận; không xóa bản cũ.`);
 }
 async function saveTimetableVersionToSupabase(version) {
-  if (!currentAuthUser || !supabaseClient)
-    throw new Error("Hãy đăng nhập Supabase trước khi lưu TKB.");
-  const userId = currentAuthUser.id;
-  const schoolYearId = await ensureSupabaseSchoolYear();
-  const week = Number(version.startWeek);
-  if (!Number.isInteger(week) || week < 1 || week > 35)
-    throw new Error("Tuần hiệu lực phải từ 1 đến 35.");
-  const calendarWeek = schoolCalendar.weeks.find(
-    (w) => Number(w.week) === week,
-  );
-  const entries = Object.entries(version.lessonsByTeacher || {}).filter(
-    ([name, rows]) => clean(name) && Array.isArray(rows),
-  );
-  const sourceRows = entries.length
-    ? entries.flatMap(([teacherName, rows]) =>
-        rows.map((x) => lessonToSupabaseRow(x, null, teacherName)),
-      )
-    : (version.lessons || []).map((x) => lessonToSupabaseRow(x, null, TEACHER));
-  if (!sourceRows.length)
-    throw new Error("Excel không có tiết hợp lệ; không lưu dữ liệu rỗng.");
-  if (currentAuthUser?.id !== userId)
-    throw new Error("Tài khoản vừa thay đổi; không lưu.");
-  const baseHash =
-    version.contentFingerprint || scheduleFingerprint(version.lessons);
-  let chosenHash = String(version.fingerprint || baseHash);
-  let id = null;
+  if(!currentAuthUser || !supabaseClient) throw new Error("Hãy đăng nhập Supabase trước khi lưu TKB.");
+  const userId=currentAuthUser.id;
+  const schoolYearId=await ensureSupabaseSchoolYear();
+  const week=Number(version.startWeek);
+  if(!Number.isInteger(week) || week<1 || week>35) throw new Error("Tuần hiệu lực phải từ 1 đến 35.");
+  const calendarWeek=schoolCalendar.weeks.find(w=>Number(w.week)===week);
+  const entries=Object.entries(version.lessonsByTeacher || {}).filter(([name,rows])=>clean(name)&&Array.isArray(rows));
+  const sourceRows=entries.length
+    ? entries.flatMap(([teacherName,rows])=>rows.map(x=>lessonToSupabaseRow(x,null,teacherName)))
+    : (version.lessons || []).map(x=>lessonToSupabaseRow(x,null,TEACHER));
+  if(!sourceRows.length) throw new Error("Excel không có tiết hợp lệ; không lưu dữ liệu rỗng.");
+  if(currentAuthUser?.id!==userId) throw new Error("Tài khoản vừa thay đổi; không lưu.");
+  const baseHash=version.contentFingerprint || scheduleFingerprint(version.lessons);
+  let chosenHash=String(version.fingerprint||baseHash);
+  let id=null;
   // Supabase có thể đã chứa hash dù bộ nhớ localhost chưa có phiên bản đó.
   // Chỉ đổi hash khi xác định chắc chắn ràng buộc hash gây xung đột.
-  for (let attempt = 0; attempt < 3; attempt++) {
-    const payload = {
-      school_year_id: schoolYearId,
-      user_id: userId,
-      teacher_name: TEACHER,
-      source_filename: version.file || "",
-      effective_week: week,
-      effective_date: calendarWeek?.start || null,
-      content_hash: chosenHash,
-      lesson_count: sourceRows.length,
-    };
-    const { data, error } = await supabaseClient
-      .from("tkb_timetable_versions")
-      .insert(payload)
-      .select("id")
-      .single();
-    if (!error) {
-      id = data?.id;
-      break;
-    }
-    if (error.code !== "23505") throw error;
-    const { data: collisions, error: checkError } = await supabaseClient
-      .from("tkb_timetable_versions")
+  for(let attempt=0;attempt<3;attempt++) {
+    const payload={school_year_id:schoolYearId,user_id:userId,teacher_name:TEACHER,
+      source_filename:version.file||"",effective_week:week,
+      effective_date:calendarWeek?.start||null,content_hash:chosenHash,
+      lesson_count:sourceRows.length};
+    const {data,error}=await supabaseClient.from("tkb_timetable_versions")
+      .insert(payload).select("id").single();
+    if(!error) { id=data?.id; break; }
+    if(error.code!=="23505") throw error;
+    const {data:collisions,error:checkError}=await supabaseClient.from("tkb_timetable_versions")
       .select("id,effective_week,source_filename,lesson_count")
-      .eq("user_id", userId)
-      .eq("school_year_id", schoolYearId)
-      .eq("content_hash", chosenHash)
-      .limit(2);
-    if (checkError) throw checkError;
-    if (!collisions?.length)
-      throw new Error(
-        "Supabase báo trùng nhưng không phải do mã nội dung TKB. Không tạo bản trùng; cần kiểm tra ràng buộc dữ liệu trên server.",
-      );
+      .eq("user_id",userId).eq("school_year_id",schoolYearId)
+      .eq("content_hash",chosenHash).limit(2);
+    if(checkError) throw checkError;
+    if(!collisions?.length)
+      throw new Error("Supabase báo trùng nhưng không phải do mã nội dung TKB. Không tạo bản trùng; cần kiểm tra ràng buộc dữ liệu trên server.");
     // Không dùng lại bản trùng vì số tiết server có thể đã thiếu/khác.
     // Phiên bản bổ sung được lưu bằng một mã revision riêng, nguyên bản không đổi.
-    chosenHash = uniqueRevisionHash(baseHash, week);
+    chosenHash=uniqueRevisionHash(baseHash,week);
   }
-  if (!id)
-    throw new Error(
-      "Không tạo được phiên bản TKB mới sau khi kiểm tra trùng nội dung. Chưa chỉnh sửa phiên bản cũ.",
-    );
-  if (currentAuthUser?.id !== userId) {
+  if(!id) throw new Error("Không tạo được phiên bản TKB mới sau khi kiểm tra trùng nội dung. Chưa chỉnh sửa phiên bản cũ.");
+  if(currentAuthUser?.id!==userId) {
     // Tránh ghi tiết dưới tài khoản khác; bản vừa tạo không được coi là hoàn tất.
-    throw new Error(
-      "Tài khoản thay đổi trong khi lưu; chưa hoàn tất phiên bản mới.",
-    );
+    throw new Error("Tài khoản thay đổi trong khi lưu; chưa hoàn tất phiên bản mới.");
   }
   try {
-    for (let i = 0; i < sourceRows.length; i += 250) {
-      const rows = sourceRows
-        .slice(i, i + 250)
-        .map((x) => ({ ...x, timetable_version_id: id }));
-      const { error } = await supabaseClient
-        .from("tkb_timetable_lessons")
-        .insert(rows);
-      if (error) throw error;
+    for(let i=0;i<sourceRows.length;i+=250) {
+      const rows=sourceRows.slice(i,i+250).map(x=>({...x,timetable_version_id:id}));
+      const {error}=await supabaseClient.from("tkb_timetable_lessons").insert(rows);
+      if(error) throw error;
     }
-    await verifyTimetableVersionRows(id, sourceRows.length, userId);
-  } catch (err) {
+    await verifyTimetableVersionRows(id,sourceRows.length,userId);
+    // Kiểm tra đọc lại bằng đúng cơ chế phân trang mà trang sẽ dùng sau Ctrl+Shift+R.
+    const auditRows = await fetchAllTimetableLessons(userId,[id],
+      'id,timetable_version_id,teacher_name,thu,tiet,mon_hoc');
+    if(auditRows.length!==sourceRows.length)
+      throw new Error(`Lỗi xác minh sau tải lại: đọc ${auditRows.length}/${sourceRows.length} dòng.`);
+  } catch(err) {
     // Không xóa phiên bản cũ; chỉ dọn bản MỚI vừa tạo khi không hoàn chỉnh.
     // Nếu dọn thất bại, báo rõ để quản trị viên xử lý (không im lặng).
-    const { error: lessonDeleteError } = await supabaseClient
-      .from("tkb_timetable_lessons")
-      .delete()
-      .eq("timetable_version_id", id)
-      .eq("user_id", userId);
-    if (lessonDeleteError)
-      throw new Error(
-        `Lưu bị lỗi (${err.message || err}); đồng thời chưa dọn được bản mới: ${lessonDeleteError.message}. Kho cũ không bị chỉnh sửa.`,
-      );
-    const { error: versionDeleteError } = await supabaseClient
-      .from("tkb_timetable_versions")
-      .delete()
-      .eq("id", id)
-      .eq("user_id", userId);
-    if (versionDeleteError)
-      throw new Error(
-        `Lưu bị lỗi (${err.message || err}); bản mới chưa dọn được: ${versionDeleteError.message}. Kho cũ không bị chỉnh sửa.`,
-      );
+    const {error:lessonDeleteError}=await supabaseClient.from("tkb_timetable_lessons")
+      .delete().eq("timetable_version_id",id).eq("user_id",userId);
+    if(lessonDeleteError) throw new Error(`Lưu bị lỗi (${err.message||err}); đồng thời chưa dọn được bản mới: ${lessonDeleteError.message}. Kho cũ không bị chỉnh sửa.`);
+    const {error:versionDeleteError}=await supabaseClient.from("tkb_timetable_versions")
+      .delete().eq("id",id).eq("user_id",userId);
+    if(versionDeleteError) throw new Error(`Lưu bị lỗi (${err.message||err}); bản mới chưa dọn được: ${versionDeleteError.message}. Kho cũ không bị chỉnh sửa.`);
     throw err;
   }
-  version.fingerprint = chosenHash;
-  version.supabaseId = id;
-  version.syncedToSupabase = true;
+  version.fingerprint=chosenHash;
+  version.supabaseId=id;
+  version.syncedToSupabase=true;
   return id;
 }
 async function syncTimetableTeacherRowsToSupabase(version) {
@@ -1188,24 +1139,64 @@ function restoredVersionMeta(version, lessons) {
     effectiveDate: version.effective_date || null,
   };
 }
-async function restoreScheduleRepositoryFromSupabase({
-  readOnly = false,
-} = {}) {
+// V5: PostgREST/Supabase thường giới hạn tối đa 1.000 bản ghi mỗi request.
+// Một TKB toàn trường có trên 1.000 tiết (file 2/11: 1.037); luôn phân trang
+// và kiểm tra số bản ghi server, tuyệt đối không dùng một .select('*') duy nhất.
+const TKB_DB_PAGE_SIZE = 400;
+async function fetchAllSupabaseRows(queryFactory, label, maxRows = 100000) {
+  const result = [];
+  let expected = null;
+  for (let offset = 0; offset < maxRows; offset += TKB_DB_PAGE_SIZE) {
+    const {data, error, count} = await queryFactory()
+      .range(offset, offset + TKB_DB_PAGE_SIZE - 1);
+    if (error) throw new Error(`${label}: ${error.message || error}`);
+    if (!Array.isArray(data)) throw new Error(`${label}: Supabase không trả về danh sách bản ghi.`);
+    if (Number.isInteger(count)) {
+      if (expected !== null && count !== expected)
+        throw new Error(`${label}: số dòng thay đổi khi đang phân trang (${expected} → ${count}). Hãy tải lại khi kho ổn định.`);
+      expected = count;
+    }
+    result.push(...data);
+    if (result.length > maxRows) throw new Error(`${label}: vượt giới hạn ${maxRows} dòng. Không thay dữ liệu đang có.`);
+    if (expected !== null && result.length >= expected) break;
+    if (data.length < TKB_DB_PAGE_SIZE) break;
+  }
+  if (expected !== null && result.length !== expected)
+    throw new Error(`${label}: chỉ đọc được ${result.length}/${expected} dòng Supabase. Không thay dữ liệu hiện tại.`);
+  if (result.length >= maxRows)
+    throw new Error(`${label}: số dòng đạt giới hạn an toàn ${maxRows}; cần kiểm tra kho.`);
+  return result;
+}
+async function fetchAllTimetableVersions(owner, schoolYearId) {
+  return fetchAllSupabaseRows(
+    () => supabaseClient.from('tkb_timetable_versions')
+      .select('id,source_filename,effective_week,effective_date,content_hash,lesson_count,created_at',{count:'exact'})
+      .eq('user_id',owner).eq('school_year_id',schoolYearId)
+      .order('created_at',{ascending:true}).order('id',{ascending:true}),
+    'Danh sách phiên bản TKB', 10000);
+}
+async function fetchAllTimetableLessons(owner, versionIds, fields = '*') {
+  const result = [];
+  // Chia ID để không tạo URL quá dài khi có nhiều phiên bản trong một năm.
+  for (let i = 0; i < versionIds.length; i += 40) {
+    const ids = versionIds.slice(i, i + 40);
+    const rows = await fetchAllSupabaseRows(
+      () => supabaseClient.from('tkb_timetable_lessons')
+        .select(fields,{count:'exact'})
+        .eq('user_id',owner).in('timetable_version_id',ids)
+        .order('id',{ascending:true}),
+      `Các tiết TKB (nhóm phiên bản ${Math.floor(i/40)+1})`,100000);
+    result.push(...rows);
+  }
+  return result;
+}
+async function restoreScheduleRepositoryFromSupabase({ readOnly = false } = {}) {
   if (!supabaseClient || !currentAuthUser) return { versions: 0, lessons: 0 };
   // BƯỚC 5.6.2B.9E.1A: giữ snapshot cache của đúng tài khoản trước khi tải Supabase.
   // Khi đóng trình duyệt/mở lại, cache này có thể chứa bản đa giáo viên mới hơn
   // (ví dụ C Hiếu 18 tiết) trong khi Supabase vẫn còn bản cũ chỉ 2 tiết.
   const schoolYearId = await ensureSupabaseSchoolYear();
-  const { data: versions, error: vErr } = await supabaseClient
-    .from("tkb_timetable_versions")
-    .select(
-      "id,source_filename,effective_week,effective_date,content_hash,lesson_count,created_at",
-    )
-    .eq("user_id", currentAuthUser.id)
-    .eq("school_year_id", schoolYearId)
-    .order("effective_week", { ascending: true })
-    .order("created_at", { ascending: true });
-  if (vErr) throw vErr;
+  const versions = await fetchAllTimetableVersions(currentAuthUser.id,schoolYearId);
   if (!versions?.length) {
     // Khi đã đăng nhập, Supabase là nguồn chính. Tài khoản không có TKB thì phải hiển thị kho trống,
     // không được giữ/khôi phục dữ liệu localStorage của máy hoặc tài khoản trước.
@@ -1219,13 +1210,24 @@ async function restoreScheduleRepositoryFromSupabase({
     return { versions: 0, lessons: 0 };
   }
   const ids = versions.map((v) => v.id);
-  const { data: rows, error: lErr } = await supabaseClient
-    .from("tkb_timetable_lessons")
-    .select("*")
-    .eq("user_id", currentAuthUser.id)
-    .in("timetable_version_id", ids)
-    .order("created_at", { ascending: true });
-  if (lErr) throw lErr;
+  const rows = await fetchAllTimetableLessons(currentAuthUser.id,ids);
+  // Chặn dữ liệu thiếu từ server/cache: mỗi bản phải có đủ số dòng đã xác nhận khi ghi.
+  // Một phần dữ liệu không được thay thế một lịch đang có đầy đủ trên máy.
+  const versionTotals = new Map();
+  for (const row of rows) versionTotals.set(row.timetable_version_id,
+    (versionTotals.get(row.timetable_version_id) || 0) + 1);
+  const incomplete = versions.filter(v => Number(v.lesson_count) > 0 &&
+    (versionTotals.get(v.id) || 0) < Number(v.lesson_count));
+  if (incomplete.length) {
+    const names = incomplete.slice(0,3).map(v =>
+      `${v.source_filename} (tuần ${v.effective_week}: ${versionTotals.get(v.id) || 0}/${v.lesson_count} dòng)`);
+    throw new Error('Supabase chưa trả đủ dữ liệu theo bản đã lưu: ' +
+      names.join(' · ') + '. Không ghi đè lịch đang có trên máy.');
+  }
+  console.info('[TKB V5] Đã đọc đầy đủ các trang Supabase:',{
+    versions: versions.length, rows: rows.length,
+    month11: versions.filter(v => /11[.\/\-]?2026/i.test(v.source_filename||'')).length
+  });
   const byVersion = new Map();
   const byVersionTeacher = new Map();
   (rows || []).forEach((r) => {
@@ -1291,7 +1293,7 @@ async function restoreScheduleRepositoryFromSupabase({
   const total = restored.reduce((n, v) => n + v.lessons.length, 0);
   const status = $("supabaseStatus");
   if (status)
-    status.textContent = `☁️ Supabase: ĐÃ KẾT NỐI • Đã đăng nhập • Đã tải ${restored.length} TKB / ${total} tiết`;
+    status.textContent = `☁️ Supabase: ĐÃ KẾT NỐI • Đã đọc đủ ${rows.length} dòng qua nhiều trang / ${restored.length} phiên bản TKB`;
   console.info("[TKB] Đã khôi phục Kho TKB từ Supabase", {
     versions: restored.length,
     lessons: total,
@@ -1327,7 +1329,7 @@ async function restoreAfterLogin(showMessage = false) {
     const status = $("supabaseStatus");
     if (status)
       status.textContent =
-        "⚠️ Supabase: Đã đăng nhập nhưng chưa tải được đầy đủ dữ liệu";
+        "⚠️ Supabase: CHƯA TẢI ĐỦ TKB. Không xác nhận dữ liệu cũ là bản mới. Hãy mở ĐỐI CHIẾU NGUỒN DỮ LIỆU.";
     if (showMessage)
       alert("Không tải được dữ liệu từ Supabase: " + (e.message || e));
     // Đồng bộ lựa chọn tuần độc lập với Kho TKB/Phụ lục 2.
@@ -1693,23 +1695,13 @@ async function readScheduleSourceDiagnostic() {
   const localRows = lessonsForSelectedTeacher(localVersion);
   const daySummary = (arr) => {
     const d = {};
-    (arr || []).forEach((x) => {
-      const k = clean(x.thu);
-      if (k) d[k] = (d[k] || 0) + 1;
-    });
-    return (
-      Object.entries(d)
-        .map(([k, n]) => `${k}: ${n}`)
-        .join(" · ") || "Không có tiết"
-    );
+    (arr || []).forEach(x => { const k = clean(x.thu); if (k) d[k] = (d[k] || 0) + 1; });
+    return Object.entries(d).map(([k,n]) => `${k}: ${n}`).join(" · ") || "Không có tiết";
   };
   const report = {
-    origin:
-      location.origin === "null" ? "file:// (mở trực tiếp)" : location.origin,
-    week,
-    teacher: selectedTeacher,
-    loggedIn: !!currentAuthUser,
-    email: currentAuthUser?.email || "",
+    origin: location.origin === "null" ? "file:// (mở trực tiếp)" : location.origin,
+    week, teacher: selectedTeacher,
+    loggedIn: !!currentAuthUser, email: currentAuthUser?.email || "",
     local: {
       count: localRows.length,
       source: localVersion?.file || "Không có phiên bản",
@@ -1717,108 +1709,52 @@ async function readScheduleSourceDiagnostic() {
       days: daySummary(localRows),
       id: localVersion?.supabaseId || null,
     },
-    remote: null,
-    error: null,
+    remote: null, error: null,
   };
-  if (!supabaseClient) {
-    report.error = "Chưa kết nối được thư viện Supabase ở địa chỉ này.";
-    return report;
-  }
-  if (!currentAuthUser) {
-    report.error =
-      "Chưa đăng nhập Supabase trên địa chỉ này. localStorage của website và VS Code KHÔNG dùng chung.";
-    return report;
-  }
+  if (!supabaseClient) { report.error = "Chưa kết nối được thư viện Supabase ở địa chỉ này."; return report; }
+  if (!currentAuthUser) { report.error = "Chưa đăng nhập Supabase trên địa chỉ này. localStorage của website và VS Code KHÔNG dùng chung."; return report; }
   try {
     let yearId = currentSchoolYearId;
     if (!yearId) {
       // Chỉ SELECT năm học; không tự INSERT như ensureSupabaseSchoolYear().
-      const { data: years, error: yError } = await supabaseClient
-        .from("tkb_school_years")
-        .select("id")
-        .eq("user_id", currentAuthUser.id)
-        .eq("school_year", TKB_SCHOOL_YEAR)
-        .limit(1);
+      const {data: years, error: yError} = await supabaseClient.from("tkb_school_years")
+        .select("id").eq("user_id", currentAuthUser.id)
+        .eq("school_year", TKB_SCHOOL_YEAR).limit(1);
       if (yError) throw yError;
       yearId = years?.[0]?.id || null;
-      if (!yearId)
-        throw new Error(
-          "Không thấy năm học " +
-            TKB_SCHOOL_YEAR +
-            " trong Supabase của tài khoản này.",
-        );
+      if (!yearId) throw new Error("Không thấy năm học " + TKB_SCHOOL_YEAR + " trong Supabase của tài khoản này.");
     }
-    let q = supabaseClient
-      .from("tkb_timetable_versions")
-      .select(
-        "id,source_filename,effective_week,created_at,school_year_id,lesson_count",
-      )
-      .eq("user_id", currentAuthUser.id)
-      .eq("school_year_id", yearId);
-    const { data: versions, error: vError } = await q.order("created_at", {
-      ascending: false,
-    });
-    if (vError) throw vError;
-    const usable = (versions || []).filter(
-      (v) => Number(v.effective_week) <= week,
-    );
-    usable.sort(
-      (a, b) =>
-        Number(b.effective_week) - Number(a.effective_week) ||
-        String(b.created_at || "").localeCompare(String(a.created_at || "")),
-    );
+    const versions = await fetchAllTimetableVersions(currentAuthUser.id,yearId);
+    const usable = (versions || []).filter(v => Number(v.effective_week) <= week);
+    usable.sort((a,b) => Number(b.effective_week) - Number(a.effective_week)
+      || String(b.created_at || "").localeCompare(String(a.created_at || "")));
     const v = usable[0];
-    if (!v) {
-      report.remote = {
-        count: 0,
-        source: "Không có phiên bản trong tuần",
-        days: "Không có tiết",
-        id: null,
-      };
-      return report;
-    }
-    const { data: rows, error: lError } = await supabaseClient
-      .from("tkb_timetable_lessons")
-      .select("teacher_name,thu,tiet,mon_hoc")
-      .eq("user_id", currentAuthUser.id)
-      .eq("timetable_version_id", v.id);
-    if (lError) throw lError;
-    const teacherRows = (rows || []).filter(
-      (x) =>
-        normalizeTeacherName(x.teacher_name) ===
-          normalizeTeacherName(selectedTeacher) && Number(x.tiet) <= 7,
-    );
+    if (!v) { report.remote = {count:0, source:"Không có phiên bản trong tuần", days:"Không có tiết", id:null}; return report; }
+    const rows = await fetchAllTimetableLessons(currentAuthUser.id,[v.id],
+      'id,timetable_version_id,teacher_name,thu,tiet,mon_hoc');
+    if(Number(v.lesson_count)>0 && rows.length<Number(v.lesson_count))
+      throw new Error(`TKB trên server mới có ${rows.length}/${v.lesson_count} dòng; chưa đủ để đối chiếu.`);
+    const teacherRows = (rows || []).filter(x => normalizeTeacherName(x.teacher_name) === normalizeTeacherName(selectedTeacher) && Number(x.tiet) <= 7);
     report.remote = {
-      count: teacherRows.length,
-      source: v.source_filename || "",
-      versionWeek: v.effective_week,
-      days: daySummary(teacherRows),
-      id: v.id,
-      allTeachersCount: (rows || []).length,
+      count:teacherRows.length, source:v.source_filename || "", versionWeek:v.effective_week,
+      days:daySummary(teacherRows), id:v.id, allTeachersCount:(rows || []).length,
     };
-  } catch (err) {
-    report.error =
-      "Không đọc được kho Supabase: " + (err?.message || String(err));
-  }
+  } catch(err) { report.error = "Không đọc được kho Supabase: " + (err?.message || String(err)); }
   return report;
 }
 async function openScheduleSourceDiagnostic() {
-  const m = modalShell(
-    "ĐỐI CHIẾU KHO TKB – KHÔNG THAY ĐỔI DỮ LIỆU",
-    `
+  const m = modalShell("ĐỐI CHIẾU KHO TKB – KHÔNG THAY ĐỔI DỮ LIỆU", `
     <p class="manage-note">Đây là công cụ chỉ đọc để so sánh bản chạy trong VS Code và website thật. Hãy mở công cụ này trên cả hai địa chỉ, cùng giáo viên và tuần.</p>
     <div id="tkbDiagResult" class="tkb-diag-result">Đang kiểm tra nguồn dữ liệu...</div>
     <div class="manage-actions"><button id="tkbDiagAgain" type="button">↻ KIỂM TRA LẠI</button><button id="tkbDiagReload" type="button" disabled>↻ NẠP LẠI TỪ SUPABASE</button></div>
-    <p class="manage-note">Không bấm Xóa phiên bản hoặc nhập lại Excel cho đến khi biết kho nào đang có đủ tiết.</p>`,
-  );
+    <p class="manage-note">Không bấm Xóa phiên bản hoặc nhập lại Excel cho đến khi biết kho nào đang có đủ tiết.</p>`);
   const box = m.querySelector("#tkbDiagResult");
   const reload = m.querySelector("#tkbDiagReload");
   async function show() {
     reload.disabled = true;
     box.textContent = "Đang đối chiếu kho máy này và kho Supabase...";
     const r = await readScheduleSourceDiagnostic();
-    const info = (x) =>
-      `<b>${x.count} tiết</b> · ${esc(x.source)} · hiệu lực tuần ${esc(x.versionWeek ?? "—")}<div class="tkb-diag-muted">${esc(x.days)}</div>`;
+    const info = (x) => `<b>${x.count} tiết</b> · ${esc(x.source)} · hiệu lực tuần ${esc(x.versionWeek ?? "—")}<div class="tkb-diag-muted">${esc(x.days)}</div>`;
     box.innerHTML = `<div><b>Địa chỉ đang mở:</b> ${esc(r.origin)}</div>
       <div><b>Tài khoản:</b> ${r.loggedIn ? "Đã đăng nhập: " + esc(r.email) : "CHƯA ĐĂNG NHẬP"}</div>
       <div><b>Đang xem:</b> Tuần ${r.week} · Giáo viên ${esc(r.teacher)}</div>
@@ -1833,42 +1769,25 @@ async function openScheduleSourceDiagnostic() {
         box.innerHTML += `<p class="tkb-diag-error">⚠ Bản máy này có nhiều tiết hơn Supabase. Không nạp đè, hãy sao lưu và đối chiếu trước.</p>`;
       } else if (r.remote.id !== r.local.id) {
         box.innerHTML += `<p>Hai kho có cùng số tiết nhưng đang dùng phiên bản khác nhau. Cần so sánh cả tên bài và ngày.</p>`;
-      } else
-        box.innerHTML += `<p class="tkb-diag-success">✓ Cùng số tiết và cùng phiên bản. Nếu web khác máy này, hãy kiểm tra tài khoản và địa chỉ web.</p>`;
+      } else box.innerHTML += `<p class="tkb-diag-success">✓ Cùng số tiết và cùng phiên bản. Nếu web khác máy này, hãy kiểm tra tài khoản và địa chỉ web.</p>`;
     }
   }
   m.querySelector("#tkbDiagAgain").onclick = show;
   reload.onclick = async () => {
     const before = await readScheduleSourceDiagnostic();
     if (!before.remote || before.remote.count <= before.local.count) {
-      alert(
-        "Không đủ cơ sở nạp lại: Supabase chưa có nhiều tiết hơn kho máy này.",
-      );
-      return;
+      alert("Không đủ cơ sở nạp lại: Supabase chưa có nhiều tiết hơn kho máy này."); return;
     }
-    if (
-      !confirm(
-        `Tuần ${before.week}: Supabase có ${before.remote.count} tiết; máy này có ${before.local.count} tiết.\n\nSao lưu kho hiện tại và nạp lại kho từ Supabase? Không ghi dữ liệu lên Supabase.`,
-      )
-    )
-      return;
+    if (!confirm(`Tuần ${before.week}: Supabase có ${before.remote.count} tiết; máy này có ${before.local.count} tiết.\n\nSao lưu kho hiện tại và nạp lại kho từ Supabase? Không ghi dữ liệu lên Supabase.`)) return;
     if (!scheduleRecoveryBackup()) return;
     reload.disabled = true;
     try {
-      await restoreScheduleRepositoryFromSupabase({ readOnly: true });
+      await restoreScheduleRepositoryFromSupabase({readOnly:true});
       const after = await readScheduleSourceDiagnostic();
-      if (after.local.count !== before.remote.count)
-        throw new Error(
-          `Sau tải lại vẫn chỉ có ${after.local.count}/${before.remote.count} tiết. Vui lòng giữ bản sao lưu và chụp bảng chẩn đoán.`,
-        );
+      if (after.local.count !== before.remote.count) throw new Error(`Sau tải lại vẫn chỉ có ${after.local.count}/${before.remote.count} tiết. Vui lòng giữ bản sao lưu và chụp bảng chẩn đoán.`);
       await show();
-      alert(
-        `Đã nạp lại ${after.local.count} tiết từ Supabase (chỉ đọc) cho Tuần ${after.week}. Hãy Ctrl+F5 và kiểm tra lại.`,
-      );
-    } catch (err) {
-      await show();
-      alert("Chưa xác nhận nạp lại thành công: " + (err?.message || err));
-    }
+      alert(`Đã nạp lại ${after.local.count} tiết từ Supabase (chỉ đọc) cho Tuần ${after.week}. Hãy Ctrl+F5 và kiểm tra lại.`);
+    } catch(err) { await show(); alert("Chưa xác nhận nạp lại thành công: " + (err?.message||err)); }
   };
   await show();
 }
@@ -9467,13 +9386,10 @@ resetGoogleSheetWeekRange = async function (firstWeek, lastWeek) {
 
 // Nhận biết đang chạy bản localhost/VS Code hay GitHub Pages (không dựa vào cache).
 (() => {
-  const el = document.getElementById("tkbBuildOrigin");
+  const el=document.getElementById("tkbBuildOrigin");
   if (!el) return;
-  const host = location.hostname;
-  el.textContent =
-    host === "localhost" || host === "127.0.0.1"
-      ? `VS Code / localhost (${location.host})`
-      : host.endsWith("github.io")
-        ? `GitHub Pages (${host})`
-        : location.origin;
+  const host=location.hostname;
+  el.textContent=(host==="localhost"||host==="127.0.0.1")
+    ? `VS Code / localhost (${location.host})`
+    : (host.endsWith("github.io") ? `GitHub Pages (${host})` : location.origin);
 })();

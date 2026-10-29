@@ -1,0 +1,25 @@
+BÁO CÁO KIỂM THỬ V5 – 29/10/2026
+
+MÔI TRƯỜNG: Node.js, Python/Chromium headless, Supabase mô phỏng.
+
+1. Kiểm tra cú pháp app.js: ĐẠT.
+2. Đọc dữ liệu Excel gốc tháng 11.2026: ĐẠT – 1.037 dòng/38 GV, 22 tiết GV Đậm.
+3. Khôi phục một phiên bản 1.037 dòng từ Supabase mô phỏng (bị giới hạn
+   1.000 dòng nếu chỉ truy vấn một lần): ĐẠT.
+4. Lưu bản Tuần 9: 1.037 dòng và 22 tiết GV Đậm, đọc lại theo trang: ĐẠT.
+5. Nạp lại kho từ Supabase mô phỏng khi có hai phiên bản, chọn bản Tuần 9:
+   ĐẠT – tổng 2.074 dòng, Tuần 9 đủ 22 tiết, có thứ Hai, thứ Ba, HĐTN.
+6. Nếu server trả thiếu dòng của một phiên bản, chặn ghi đè dữ liệu cục bộ: ĐẠT.
+7. Kiểm thử khởi tạo giao diện Chromium hai lần từ trạng thái sạch,
+   mô phỏng reload: ĐẠT – cả hai lần đều đủ 22 tiết, thứ Hai/Thứ Ba và HĐTN.
+8. Kiểm tra ZIP, tệp nguồn và HTML cache-busting: ĐẠT.
+
+GIỚI HẠN KIỂM THỬ
+- Thử nghiệm trình duyệt được thực hiện bằng nội dung HTML và mô phỏng API.
+- Không truy cập được Supabase thật hoặc GitHub Pages với phiên đăng nhập của bạn.
+- Kiểm thử tải trang qua HTTP localhost trong môi trường này bị hệ thống chặn;
+  nên chưa xác nhận kịch bản Ctrl+Shift+R thực sự trên thiết bị của bạn.
+- Chưa thể xác nhận toàn bộ tính năng Google Sheets, in/PDF và đồng bộ đa máy.
+
+KHÔNG tuyên bố bản này đạt 100% trong môi trường sản xuất; cần kiểm thử V5
+trên Live Server bằng đúng tài khoản hiện đang có dữ liệu TKB của bạn.

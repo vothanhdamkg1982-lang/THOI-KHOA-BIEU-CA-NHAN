@@ -1,0 +1,40 @@
+THỜI KHÓA BIỂU GV ĐẬM – V5 (ĐỌC SUPABASE THEO TRANG)
+Ngày 29/10/2026
+
+NGUYÊN NHÂN ĐÃ KIỂM TRA TỪ MÃ NGUỒN
+- Tệp Excel "TKB THÁNG 11.2026 (2.11).xlsx" có 1.037 dòng tiết học của toàn trường,
+  trong đó có 22 tiết GV Đậm (bao gồm ba tiết HĐTN).
+- Bộ khôi phục của phiên bản trước chỉ truy vấn bảng tkb_timetable_lessons một lần.
+  Supabase/PostgREST có giới hạn dòng trả về, thông thường mặc định 1.000 dòng.
+  Vì vậy màn hình ngay sau tải Excel có thể đúng 22 tiết nhưng sau làm mới
+  lại quay về bản cũ hoặc đọc thiếu, dù phần nhập trước đó không lỗi.
+- V5 phân trang toàn bộ dữ liệu, đối chiếu tổng dòng của từng phiên bản với
+  lesson_count và KHÔNG ghi đè cache đang có khi tải server không đầy đủ.
+
+CÁCH CẬP NHẬT TRÊN VS CODE (CHƯA ĐƯA LÊN GITHUB)
+1. Sao lưu toàn bộ thư mục dự án hiện tại, ví dụ tên ..._SAO_LUU_TRUOC_V5.
+2. Giải nén ZIP V5. Ghi đè đúng ba tệp index.html, app.js, styles.css
+   vào thư mục mã nguồn đang mở bằng VS Code.
+3. Chạy bằng Live Server: http://127.0.0.1:5500 (hoặc cổng Live Server của bạn).
+   Không dùng GitHub Pages khi đang kiểm tra mã nguồn mới trên VS Code.
+4. Nhấn Ctrl+Shift+R, xác nhận có chữ "Bản V5" trong ứng dụng.
+5. Đăng nhập Supabase, chọn GV Đậm, Tuần 9; chờ dòng trạng thái
+   "Đã đọc đủ ... dòng qua nhiều trang".
+6. Nếu đã thấy 22 tiết và 3 tiết HĐTN, nhấn Ctrl+Shift+R 2 lần nữa và kiểm tra
+   kết quả vẫn còn 22 tiết, thứ Hai và thứ Ba không biến mất.
+7. Nếu chỉ thấy 20 tiết, hãy SAO LƯU Kho TKB, sau đó dùng
+   "KHÔI PHỤC TUẦN ĐANG XEM TỪ EXCEL" để nhập file Excel tháng 11
+   có trong thư mục DU_LIEU_DOI_CHIEU. Chỉ bấm xác nhận khi thông báo ghi đúng
+   TUẦN 9 và 22 tiết GV Đậm, không phải Tuần 1 hoặc 4.
+8. Đợi thông báo LƯU và XÁC MINH ĐỦ DÒNG, sau đó Ctrl+Shift+R và kiểm tra lại.
+9. Chỉ khi localhost ổn định mới cân nhắc cập nhật GitHub Pages.
+
+AN TOÀN DỮ LIỆU
+- Không cần chạy SQL mới và không cần xóa bản TKB nào đã có.
+- Chức năng nạp khi khởi động chỉ ĐỌC Supabase; không ghi đè server bằng
+  bản 15/20 tiết còn trong bộ nhớ máy.
+- Phép thử trong môi trường phát triển dùng Supabase mô phỏng, không có quyền
+  truy cập tài khoản/server sản xuất của bạn. Vì vậy chưa thể đảm bảo tất cả
+  tính năng thực tế đã đạt.
+- Nếu hiện cảnh báo "CHƯA TẢI ĐỦ TKB" hoặc "... dòng", ngừng nhập lại liên tục;
+  chụp màn hình thông báo và mở nút ĐỐI CHIẾU NGUỒN DỮ LIỆU.
